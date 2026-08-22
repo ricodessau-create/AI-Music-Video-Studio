@@ -14,6 +14,12 @@ data class ProjectEntity(
     val resolutionWidth: Int,
     val resolutionHeight: Int,
     val aspectRatio: String,
+    val renderMode: String,
+    val comfyUiBaseUrl: String?,
+    val globalVisualStyle: String,
+    val negativePrompt: String,
+    val characterReferenceImagePath: String?,
+    val selectedWorkflowId: String?,
     val createdAtEpochMillis: Long,
     val updatedAtEpochMillis: Long
 )
