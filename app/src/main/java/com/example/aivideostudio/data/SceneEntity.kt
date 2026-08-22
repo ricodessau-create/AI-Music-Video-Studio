@@ -16,5 +16,10 @@ data class SceneEntity(
     val cameraMovement: String,
     val transitionType: String,
     val effectsJson: String,
-    val intensity: Float
+    val intensity: Float,
+    val seed: Long,
+    val generationStatus: String,
+    val generatedMediaPath: String?,
+    val generatedMediaType: String,
+    val generationErrorMessage: String?
 )
