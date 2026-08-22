@@ -2,6 +2,7 @@ package com.example.aivideostudio.storyboard
 
 import com.example.aivideostudio.audio.AudioFeatures
 import java.util.UUID
+import kotlin.random.Random
 
 data class GeneratedScene(
     val id: String,
@@ -13,7 +14,8 @@ data class GeneratedScene(
     val cameraMovement: String,
     val transitionType: String,
     val effects: List<String>,
-    val intensity: Float
+    val intensity: Float,
+    val seed: Long
 )
 
 class StoryboardGenerator {
@@ -22,16 +24,26 @@ class StoryboardGenerator {
         projectId: String,
         audioFeatures: AudioFeatures,
         visualParameters: VisualParameters,
-        basePrompt: String
+        basePrompt: String,
+        globalVisualStyle: String = ""
     ): List<GeneratedScene> {
         val sectionLabels = buildSectionLabels(audioFeatures)
         val scenes = ArrayList<GeneratedScene>()
+        val promptGenerator = ScenePromptGenerator()
+        val random = Random(System.nanoTime())
 
         for ((index, section) in sectionLabels.withIndex()) {
             val effects = buildEffectsForSection(section.label, visualParameters)
             val camera = pickCameraMovement(section.label, visualParameters, index)
             val transition = pickTransition(section.label, visualParameters)
             val intensity = computeIntensity(audioFeatures, section.startTime, section.endTime)
+
+            val prompt = promptGenerator.generateScenePrompt(
+                sectionLabel = section.label,
+                sceneIndexInSection = index,
+                globalVisualStyle = globalVisualStyle,
+                userVisualPrompt = basePrompt
+            )
 
             scenes.add(
                 GeneratedScene(
@@ -40,11 +52,12 @@ class StoryboardGenerator {
                     label = section.label,
                     startTimeSeconds = section.startTime,
                     endTimeSeconds = section.endTime,
-                    prompt = basePrompt,
+                    prompt = prompt,
                     cameraMovement = camera,
                     transitionType = transition,
                     effects = effects,
-                    intensity = intensity
+                    intensity = intensity,
+                    seed = random.nextLong().let { if (it < 0) -it else it }
                 )
             )
         }
@@ -112,8 +125,9 @@ class StoryboardGenerator {
     }
 
     private fun pickCameraMovement(label: String, visual: VisualParameters, index: Int): String {
-        if (visual.cameraPace == "slow") return "slow_pan"
-        if (label == "Chorus" || label == "Breakdown") return "fast_zoom"
+        if (label == "Breakdown") return "slow_pan"
+        if (visual.cameraPace == "slow" && label != "Chorus" && label != "Solo") return "slow_pan"
+        if (label == "Chorus" || label == "Solo") return "fast_zoom"
         val cycle = listOf("pan_left", "pan_right", "zoom_in", "zoom_out", "static_with_parallax")
         return cycle[index % cycle.size]
     }
