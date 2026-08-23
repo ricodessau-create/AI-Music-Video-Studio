@@ -6,9 +6,14 @@ import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.example.aivideostudio.audio.BeatDetector
 import com.example.aivideostudio.audio.PcmAudioDecoder
+import com.example.aivideostudio.comfyui.WorkflowRepository
 import com.example.aivideostudio.data.AppDatabase
+import com.example.aivideostudio.data.GeneratedMediaType
+import com.example.aivideostudio.data.GenerationStatus
 import com.example.aivideostudio.data.ProjectRepository
+import com.example.aivideostudio.data.RenderMode
 import com.example.aivideostudio.data.RenderPresets
+import com.example.aivideostudio.data.SceneEntity
 import com.example.aivideostudio.storyboard.GeneratedScene
 import com.example.aivideostudio.storyboard.VisualPromptAnalyzer
 import java.io.File
@@ -26,9 +31,15 @@ class RenderWorker(context: Context, parameters: WorkerParameters) : CoroutineWo
         val project = repository.getProject(projectId) ?: return Result.failure(
             workDataOf(KEY_ERROR_MESSAGE to "Ungültige Datei.")
         )
-        val sceneEntities = repository.getScenes(projectId)
+        var sceneEntities = repository.getScenes(projectId)
         if (sceneEntities.isEmpty()) {
             return Result.failure(workDataOf(KEY_ERROR_MESSAGE to "Rendern wurde abgebrochen."))
+        }
+
+        val renderMode = try {
+            RenderMode.valueOf(project.renderMode)
+        } catch (exception: Exception) {
+            RenderMode.OFFLINE
         }
 
         return try {
@@ -37,6 +48,79 @@ class RenderWorker(context: Context, parameters: WorkerParameters) : CoroutineWo
             val audioFeatures = beatDetector.analyze()
 
             val visualParameters = VisualPromptAnalyzer().analyze(project.visualPrompt)
+
+            val aiGeneratedMedia = HashMap<String, SceneMediaInfo>()
+
+            if (renderMode == RenderMode.COMFYUI) {
+                val comfyUiBaseUrl = project.comfyUiBaseUrl
+                val workflowId = project.selectedWorkflowId
+
+                if (comfyUiBaseUrl.isNullOrBlank() || workflowId.isNullOrBlank()) {
+                    return Result.failure(workDataOf(KEY_ERROR_MESSAGE to "ComfyUI-Server nicht erreichbar."))
+                }
+
+                val workflowRepository = WorkflowRepository()
+                val storedWorkflow = workflowRepository.listWorkflows(applicationContext).firstOrNull { it.id == workflowId }
+                    ?: return Result.failure(workDataOf(KEY_ERROR_MESSAGE to "KI-Generierung fehlgeschlagen."))
+
+                val orchestrator = SceneGenerationOrchestrator(applicationContext, comfyUiBaseUrl)
+                val isAvailable = orchestrator.checkConnection()
+                if (!isAvailable) {
+                    return Result.failure(workDataOf(KEY_ERROR_MESSAGE to "ComfyUI-Server nicht erreichbar."))
+                }
+
+                val sortedScenes = sceneEntities.sortedBy { it.orderIndex }
+                for ((index, scene) in sortedScenes.withIndex()) {
+                    setProgressAsync(
+                        workDataOf(
+                            KEY_PROGRESS_PERCENT to ((index * 100) / sortedScenes.size),
+                            KEY_CURRENT_SCENE to "Szene ${index + 1} von ${sortedScenes.size}: ${scene.label}"
+                        )
+                    )
+
+                    val alreadyGenerated = scene.generationStatus == GenerationStatus.GENERATED.name &&
+                        scene.generatedMediaPath != null &&
+                        File(scene.generatedMediaPath).exists()
+
+                    if (alreadyGenerated) {
+                        aiGeneratedMedia[scene.id] = SceneMediaInfo(
+                            filePath = scene.generatedMediaPath!!,
+                            mediaType = GeneratedMediaType.valueOf(scene.generatedMediaType)
+                        )
+                        continue
+                    }
+
+                    repository.markSceneGenerating(scene)
+
+                    val result = orchestrator.generateScene(
+                        scene = scene,
+                        workflow = storedWorkflow,
+                        negativePrompt = project.negativePrompt,
+                        width = project.resolutionWidth,
+                        height = project.resolutionHeight,
+                        characterReferenceImagePath = project.characterReferenceImagePath
+                    ) { statusText ->
+                        setProgressAsync(
+                            workDataOf(
+                                KEY_PROGRESS_PERCENT to ((index * 100) / sortedScenes.size),
+                                KEY_CURRENT_SCENE to "Szene ${index + 1} von ${sortedScenes.size}: $statusText"
+                            )
+                        )
+                    }
+
+                    when (result) {
+                        is SceneGenerationResult.Success -> {
+                            repository.markSceneGenerated(scene, result.filePath, result.mediaType)
+                            aiGeneratedMedia[scene.id] = SceneMediaInfo(result.filePath, result.mediaType)
+                        }
+                        is SceneGenerationResult.Failure -> {
+                            repository.markSceneFailed(scene, result.message)
+                        }
+                    }
+                }
+
+                sceneEntities = repository.getScenes(projectId)
+            }
 
             val generatedScenes = sceneEntities.map { entity ->
                 GeneratedScene(
@@ -49,7 +133,8 @@ class RenderWorker(context: Context, parameters: WorkerParameters) : CoroutineWo
                     cameraMovement = entity.cameraMovement,
                     transitionType = entity.transitionType,
                     effects = entity.effectsJson.split(",").filter { it.isNotBlank() },
-                    intensity = entity.intensity
+                    intensity = entity.intensity,
+                    seed = entity.seed
                 )
             }
 
@@ -78,7 +163,8 @@ class RenderWorker(context: Context, parameters: WorkerParameters) : CoroutineWo
                 scenes = generatedScenes,
                 visualParameters = visualParameters,
                 audioFeatures = audioFeatures,
-                backgroundImagePaths = backgroundPaths
+                backgroundImagePaths = backgroundPaths,
+                aiGeneratedMedia = aiGeneratedMedia
             ) { progress ->
                 when (progress) {
                     is RenderProgress.InProgress -> {
@@ -88,7 +174,7 @@ class RenderWorker(context: Context, parameters: WorkerParameters) : CoroutineWo
                             setProgressAsync(
                                 workDataOf(
                                     KEY_PROGRESS_PERCENT to percent,
-                                    KEY_CURRENT_SCENE to progress.currentSceneLabel
+                                    KEY_CURRENT_SCENE to "Rendering: ${progress.currentSceneLabel}"
                                 )
                             )
                         }
