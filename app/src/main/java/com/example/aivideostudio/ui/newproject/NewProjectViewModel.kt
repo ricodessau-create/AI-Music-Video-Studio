@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.aivideostudio.audio.BeatDetector
 import com.example.aivideostudio.audio.PcmAudioDecoder
+import com.example.aivideostudio.data.RenderMode
 import com.example.aivideostudio.data.RenderPresets
 import com.example.aivideostudio.di.ServiceLocator
 import com.example.aivideostudio.storyboard.StoryboardGenerator
@@ -35,7 +36,13 @@ class NewProjectViewModel(application: Application) : AndroidViewModel(applicati
         songFilePath: String,
         visualPrompt: String,
         resolutionLabel: String,
-        aspectRatio: String
+        aspectRatio: String,
+        renderMode: RenderMode,
+        comfyUiBaseUrl: String?,
+        globalVisualStyle: String,
+        negativePrompt: String,
+        characterReferenceImagePath: String?,
+        selectedWorkflowId: String?
     ) {
         viewModelScope.launch {
             _uiState.value = NewProjectUiState.Analyzing
@@ -54,7 +61,13 @@ class NewProjectViewModel(application: Application) : AndroidViewModel(applicati
                     visualPrompt = visualPrompt,
                     resolutionWidth = renderSettings.resolutionWidth,
                     resolutionHeight = renderSettings.resolutionHeight,
-                    aspectRatio = aspectRatio
+                    aspectRatio = aspectRatio,
+                    renderMode = renderMode,
+                    comfyUiBaseUrl = comfyUiBaseUrl,
+                    globalVisualStyle = globalVisualStyle,
+                    negativePrompt = negativePrompt,
+                    characterReferenceImagePath = characterReferenceImagePath,
+                    selectedWorkflowId = selectedWorkflowId
                 )
 
                 val visualParameters = VisualPromptAnalyzer().analyze(visualPrompt)
@@ -62,7 +75,8 @@ class NewProjectViewModel(application: Application) : AndroidViewModel(applicati
                     projectId = projectId,
                     audioFeatures = audioFeatures,
                     visualParameters = visualParameters,
-                    basePrompt = visualPrompt
+                    basePrompt = visualPrompt,
+                    globalVisualStyle = globalVisualStyle
                 )
                 repository.saveScenes(projectId, scenes)
 
