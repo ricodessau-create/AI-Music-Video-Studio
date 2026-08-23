@@ -5,7 +5,6 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.Paint
-import android.graphics.PorterDuff
 import android.graphics.RectF
 import com.example.aivideostudio.storyboard.GeneratedScene
 import com.example.aivideostudio.storyboard.VisualParameters
@@ -23,6 +22,13 @@ class SceneFrameRenderer(
         bitmapPool[key] = bitmap
     }
 
+    fun unregisterBitmap(key: String) {
+        val bitmap = bitmapPool.remove(key)
+        if (bitmap != null && !bitmap.isRecycled) {
+            bitmap.recycle()
+        }
+    }
+
     fun renderFrame(
         scene: GeneratedScene,
         visualParameters: VisualParameters,
@@ -30,13 +36,20 @@ class SceneFrameRenderer(
         cameraState: CameraState,
         particleSnapshots: Map<ParticleType, List<Particle>>,
         audioAmplitude: Float,
-        backgroundKey: String?
+        backgroundKey: String?,
+        aiFrameOverride: Bitmap? = null
     ): Bitmap {
         val outputBitmap = Bitmap.createBitmap(outputWidth, outputHeight, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(outputBitmap)
 
         drawBaseBackground(canvas, visualParameters)
-        drawParallaxLayers(canvas, parallaxEngine, cameraState, backgroundKey)
+
+        if (aiFrameOverride != null) {
+            drawAiFrameWithMotion(canvas, aiFrameOverride, cameraState)
+        } else {
+            drawParallaxLayers(canvas, parallaxEngine, cameraState, backgroundKey)
+        }
+
         drawParticles(canvas, particleSnapshots)
         drawVignette(canvas)
         if (audioAmplitude > 0.6f) {
@@ -48,6 +61,21 @@ class SceneFrameRenderer(
         drawFilmGrain(canvas)
 
         return outputBitmap
+    }
+
+    private fun drawAiFrameWithMotion(canvas: Canvas, aiFrame: Bitmap, cameraState: CameraState) {
+        val matrix = Matrix()
+        val scaleX = outputWidth.toFloat() / aiFrame.width.toFloat() * cameraState.zoom
+        val scaleY = outputHeight.toFloat() / aiFrame.height.toFloat() * cameraState.zoom
+        val scale = maxOf(scaleX, scaleY)
+        matrix.postScale(scale, scale)
+        val scaledWidth = aiFrame.width * scale
+        val scaledHeight = aiFrame.height * scale
+        val translateX = (outputWidth - scaledWidth) / 2f + cameraState.x
+        val translateY = (outputHeight - scaledHeight) / 2f + cameraState.y
+        matrix.postTranslate(translateX, translateY)
+        paint.alpha = 255
+        canvas.drawBitmap(aiFrame, matrix, paint)
     }
 
     private fun drawBaseBackground(canvas: Canvas, visualParameters: VisualParameters) {
