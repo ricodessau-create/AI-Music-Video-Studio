@@ -3,6 +3,7 @@ package com.example.aivideostudio.render
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import com.example.aivideostudio.audio.AudioFeatures
+import com.example.aivideostudio.data.GeneratedMediaType
 import com.example.aivideostudio.data.RenderSettings
 import com.example.aivideostudio.storyboard.GeneratedScene
 import com.example.aivideostudio.storyboard.VisualParameters
@@ -13,6 +14,11 @@ sealed class RenderProgress {
     data class Failed(val message: String) : RenderProgress()
     data class Completed(val outputFilePath: String) : RenderProgress()
 }
+
+data class SceneMediaInfo(
+    val filePath: String,
+    val mediaType: GeneratedMediaType
+)
 
 class VideoRenderPipeline(
     private val outputDirectory: File,
@@ -26,6 +32,7 @@ class VideoRenderPipeline(
         visualParameters: VisualParameters,
         audioFeatures: AudioFeatures,
         backgroundImagePaths: Map<String, String>,
+        aiGeneratedMedia: Map<String, SceneMediaInfo> = emptyMap(),
         onProgress: (RenderProgress) -> Unit
     ) {
         try {
@@ -46,6 +53,18 @@ class VideoRenderPipeline(
             val frameRenderer = SceneFrameRenderer(renderSettings.resolutionWidth, renderSettings.resolutionHeight)
             loadBitmaps(frameRenderer, backgroundImagePaths)
 
+            val aiFrameSources = HashMap<String, AiSceneFrameSource>()
+            for ((sceneId, mediaInfo) in aiGeneratedMedia) {
+                val source = AiSceneFrameSource(
+                    filePath = mediaInfo.filePath,
+                    mediaType = mediaInfo.mediaType,
+                    outputWidth = renderSettings.resolutionWidth,
+                    outputHeight = renderSettings.resolutionHeight
+                )
+                source.prepare()
+                aiFrameSources[sceneId] = source
+            }
+
             val totalDuration = audioFeatures.durationSeconds
             val totalFrames = (totalDuration * renderSettings.frameRate).toInt().coerceAtLeast(1)
 
@@ -65,6 +84,9 @@ class VideoRenderPipeline(
 
                 val cameraController = CameraMotionController(scene.cameraMovement)
                 val cameraState = cameraController.computeState(sceneProgress, scene.intensity)
+
+                val aiSource = aiFrameSources[scene.id]
+                val aiFrameOverride = aiSource?.getFrameBitmapAtSceneProgress(sceneProgress)
 
                 val parallaxLayers = listOf(
                     ParallaxLayer(bitmapKey = "background_${scene.id}", depthFactor = 0.3f),
@@ -87,7 +109,8 @@ class VideoRenderPipeline(
                     cameraState = cameraState,
                     particleSnapshots = particleSnapshots,
                     audioAmplitude = amplitude,
-                    backgroundKey = backgroundImagePaths[scene.id]?.let { "background_${scene.id}" }
+                    backgroundKey = backgroundImagePaths[scene.id]?.let { "background_${scene.id}" },
+                    aiFrameOverride = aiFrameOverride
                 )
 
                 val presentationTimeUs = (timeSeconds * 1_000_000).toLong()
@@ -99,6 +122,9 @@ class VideoRenderPipeline(
 
             encoder.finish()
             frameRenderer.recycle()
+            for (source in aiFrameSources.values) {
+                source.release()
+            }
 
             val finalOutputFile = File(outputDirectory, "ai_music_video_$projectId.mp4")
             if (finalOutputFile.exists()) {
