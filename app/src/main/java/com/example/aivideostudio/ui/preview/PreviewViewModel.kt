@@ -1,78 +1,92 @@
 package com.example.aivideostudio.ui.preview
 
-import android.app.Application
-import androidx.lifecycle.AndroidViewModel
-import androidx.lifecycle.viewModelScope
-import androidx.work.Data
-import androidx.work.OneTimeWorkRequestBuilder
-import androidx.work.WorkInfo
-import androidx.work.WorkManager
-import com.example.aivideostudio.render.RenderWorker
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
+import android.content.Intent
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Button
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
+import androidx.core.content.FileProvider
+import androidx.lifecycle.viewmodel.compose.viewModel
+import java.io.File
 
-sealed class PreviewUiState {
-    object Idle : PreviewUiState()
-    data class Rendering(val percent: Int, val sceneLabel: String) : PreviewUiState()
-    data class Failed(val message: String) : PreviewUiState()
-    data class Completed(val outputPath: String) : PreviewUiState()
-}
+@Composable
+fun PreviewScreen(projectId: String, onBack: () -> Unit, viewModel: PreviewViewModel = viewModel()) {
+    val context = LocalContext.current
+    val uiState by viewModel.uiState.collectAsState()
 
-class PreviewViewModel(application: Application) : AndroidViewModel(application) {
-
-    private val workManager = WorkManager.getInstance(application)
-
-    private val _uiState = MutableStateFlow<PreviewUiState>(PreviewUiState.Idle)
-    val uiState: StateFlow<PreviewUiState> = _uiState.asStateFlow()
-
-    fun startRender(projectId: String) {
-        viewModelScope.launch {
-            _uiState.value = PreviewUiState.Rendering(0, "")
-
-            val inputData = Data.Builder()
-                .putString(RenderWorker.KEY_PROJECT_ID, projectId)
-                .build()
-
-            val request = OneTimeWorkRequestBuilder<RenderWorker>()
-                .setInputData(inputData)
-                .addTag(RENDER_TAG_PREFIX + projectId)
-                .build()
-
-            workManager.enqueue(request)
-
-            workManager.getWorkInfoByIdLiveData(request.id).observeForever { workInfo ->
-                if (workInfo == null) return@observeForever
-                when (workInfo.state) {
-                    WorkInfo.State.RUNNING -> {
-                        val percent = workInfo.progress.getInt(RenderWorker.KEY_PROGRESS_PERCENT, 0)
-                        val sceneLabel = workInfo.progress.getString(RenderWorker.KEY_CURRENT_SCENE) ?: ""
-                        _uiState.value = PreviewUiState.Rendering(percent, sceneLabel)
-                    }
-                    WorkInfo.State.SUCCEEDED -> {
-                        val outputPath = workInfo.outputData.getString(RenderWorker.KEY_OUTPUT_PATH)
-                        if (outputPath != null) {
-                            _uiState.value = PreviewUiState.Completed(outputPath)
-                        } else {
-                            _uiState.value = PreviewUiState.Failed("Rendern wurde abgebrochen.")
-                        }
-                    }
-                    WorkInfo.State.FAILED -> {
-                        val message = workInfo.outputData.getString(RenderWorker.KEY_ERROR_MESSAGE)
-                            ?: "Rendern wurde abgebrochen."
-                        _uiState.value = PreviewUiState.Failed(message)
-                    }
-                    WorkInfo.State.CANCELLED -> {
-                        _uiState.value = PreviewUiState.Failed("Rendern wurde abgebrochen.")
-                    }
-                    else -> Unit
-                }
-            }
-        }
+    LaunchedEffect(projectId) {
+        viewModel.startRender(projectId)
     }
 
-    companion object {
-        private const val RENDER_TAG_PREFIX = "render_job_"
+    Scaffold(topBar = { TopAppBar(title = { Text("Rendering & Vorschau") }) }) { paddingValues ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            when (val currentState = uiState) {
+                is PreviewUiState.Idle -> {
+                    Text("Bereite Rendern vor...")
+                }
+                is PreviewUiState.Rendering -> {
+                    Text(currentState.sceneLabel)
+                    LinearProgressIndicator(
+                        progress = { currentState.percent / 100f },
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                    Text("${currentState.percent}%")
+                }
+                is PreviewUiState.Failed -> {
+                    Text(text = currentState.message)
+                    Button(onClick = { viewModel.startRender(projectId) }) {
+                        Text("Erneut versuchen")
+                    }
+                }
+                is PreviewUiState.Completed -> {
+                    Text("Video fertig gestellt.")
+                    Button(onClick = {
+                        val file = File(currentState.outputPath)
+                        val uri = FileProvider.getUriForFile(context, context.packageName + ".fileprovider", file)
+                        val intent = Intent(Intent.ACTION_VIEW)
+                        intent.setDataAndType(uri, "video/mp4")
+                        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        context.startActivity(intent)
+                    }) {
+                        Text("Video abspielen")
+                    }
+                    Button(onClick = {
+                        val file = File(currentState.outputPath)
+                        val uri = FileProvider.getUriForFile(context, context.packageName + ".fileprovider", file)
+                        val shareIntent = Intent(Intent.ACTION_SEND)
+                        shareIntent.type = "video/mp4"
+                        shareIntent.putExtra(Intent.EXTRA_STREAM, uri)
+                        shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        context.startActivity(Intent.createChooser(shareIntent, "Video teilen"))
+                    }) {
+                        Text("Video teilen")
+                    }
+                }
+            }
+
+            Button(onClick = onBack) {
+                Text("Zurück zum Storyboard")
+            }
+        }
     }
 }
