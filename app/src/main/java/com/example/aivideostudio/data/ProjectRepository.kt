@@ -22,7 +22,13 @@ class ProjectRepository(private val database: AppDatabase) {
         visualPrompt: String,
         resolutionWidth: Int,
         resolutionHeight: Int,
-        aspectRatio: String
+        aspectRatio: String,
+        renderMode: RenderMode,
+        comfyUiBaseUrl: String?,
+        globalVisualStyle: String,
+        negativePrompt: String,
+        characterReferenceImagePath: String?,
+        selectedWorkflowId: String?
     ): String {
         val projectId = UUID.randomUUID().toString()
         val now = System.currentTimeMillis()
@@ -36,11 +42,32 @@ class ProjectRepository(private val database: AppDatabase) {
             resolutionWidth = resolutionWidth,
             resolutionHeight = resolutionHeight,
             aspectRatio = aspectRatio,
+            renderMode = renderMode.name,
+            comfyUiBaseUrl = comfyUiBaseUrl,
+            globalVisualStyle = globalVisualStyle,
+            negativePrompt = negativePrompt,
+            characterReferenceImagePath = characterReferenceImagePath,
+            selectedWorkflowId = selectedWorkflowId,
             createdAtEpochMillis = now,
             updatedAtEpochMillis = now
         )
         database.projectDao().upsertProject(entity)
         return projectId
+    }
+
+    suspend fun updateProjectSettings(
+        project: ProjectEntity,
+        renderMode: RenderMode,
+        comfyUiBaseUrl: String?,
+        selectedWorkflowId: String?
+    ) {
+        val updated = project.copy(
+            renderMode = renderMode.name,
+            comfyUiBaseUrl = comfyUiBaseUrl,
+            selectedWorkflowId = selectedWorkflowId,
+            updatedAtEpochMillis = System.currentTimeMillis()
+        )
+        database.projectDao().upsertProject(updated)
     }
 
     suspend fun saveScenes(projectId: String, scenes: List<GeneratedScene>) {
@@ -58,7 +85,12 @@ class ProjectRepository(private val database: AppDatabase) {
                 cameraMovement = scene.cameraMovement,
                 transitionType = scene.transitionType,
                 effectsJson = scene.effects.joinToString(","),
-                intensity = scene.intensity
+                intensity = scene.intensity,
+                seed = scene.seed,
+                generationStatus = GenerationStatus.NOT_GENERATED.name,
+                generatedMediaPath = null,
+                generatedMediaType = GeneratedMediaType.NONE.name,
+                generationErrorMessage = null
             )
         }
         database.projectDao().upsertScenes(entities)
@@ -74,5 +106,49 @@ class ProjectRepository(private val database: AppDatabase) {
 
     suspend fun deleteProject(project: ProjectEntity) {
         database.projectDao().deleteProject(project)
+    }
+
+    suspend fun markSceneGenerating(scene: SceneEntity) {
+        database.projectDao().updateScene(
+            scene.copy(generationStatus = GenerationStatus.GENERATING.name, generationErrorMessage = null)
+        )
+    }
+
+    suspend fun markSceneGenerated(scene: SceneEntity, filePath: String, mediaType: GeneratedMediaType) {
+        database.projectDao().updateScene(
+            scene.copy(
+                generationStatus = GenerationStatus.GENERATED.name,
+                generatedMediaPath = filePath,
+                generatedMediaType = mediaType.name,
+                generationErrorMessage = null
+            )
+        )
+    }
+
+    suspend fun markSceneFailed(scene: SceneEntity, errorMessage: String) {
+        database.projectDao().updateScene(
+            scene.copy(
+                generationStatus = GenerationStatus.FAILED.name,
+                generationErrorMessage = errorMessage
+            )
+        )
+    }
+
+    suspend fun resetSceneForRegeneration(scene: SceneEntity, newSeed: Long?) {
+        database.projectDao().updateScene(
+            scene.copy(
+                generationStatus = GenerationStatus.NOT_GENERATED.name,
+                generatedMediaPath = null,
+                generatedMediaType = GeneratedMediaType.NONE.name,
+                generationErrorMessage = null,
+                seed = newSeed ?: scene.seed
+            )
+        )
+    }
+}
+
+suspend fun ProjectRepository.saveScenesRaw(scenes: List<SceneEntity>) {
+    for (scene in scenes) {
+        this.updateScene(scene)
     }
 }
