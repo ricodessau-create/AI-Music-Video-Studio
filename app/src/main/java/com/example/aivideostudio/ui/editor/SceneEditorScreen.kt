@@ -13,6 +13,7 @@ import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.IconButton
@@ -28,6 +29,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.aivideostudio.data.GenerationStatus
+import com.example.aivideostudio.data.RenderMode
 import com.example.aivideostudio.data.SceneEntity
 
 @Composable
@@ -42,6 +45,7 @@ fun SceneEditorScreen(
 
     val scenes by viewModel.scenes.collectAsState()
     val project by viewModel.project.collectAsState()
+    val isComfyUiMode = project?.renderMode == RenderMode.COMFYUI.name
 
     Scaffold(
         topBar = { TopAppBar(title = { Text(project?.name ?: "Storyboard") }) }
@@ -60,6 +64,7 @@ fun SceneEditorScreen(
                 items(scenes.sortedBy { it.orderIndex }) { scene ->
                     SceneRow(
                         scene = scene,
+                        isComfyUiMode = isComfyUiMode,
                         onPromptChange = { newPrompt -> viewModel.updateScenePrompt(scene, newPrompt) },
                         onDelete = { viewModel.deleteScene(scene) },
                         onDuplicate = { viewModel.duplicateScene(scene) },
@@ -70,7 +75,9 @@ fun SceneEditorScreen(
                         },
                         onShorten = {
                             viewModel.updateSceneTiming(scene, scene.startTimeSeconds, scene.endTimeSeconds - 1.0)
-                        }
+                        },
+                        onRegenerate = { viewModel.regenerateScene(scene, useNewSeed = false) },
+                        onRegenerateWithNewSeed = { viewModel.regenerateScene(scene, useNewSeed = true) }
                     )
                 }
             }
@@ -90,18 +97,29 @@ fun SceneEditorScreen(
 @Composable
 private fun SceneRow(
     scene: SceneEntity,
+    isComfyUiMode: Boolean,
     onPromptChange: (String) -> Unit,
     onDelete: () -> Unit,
     onDuplicate: () -> Unit,
     onMoveUp: () -> Unit,
     onMoveDown: () -> Unit,
     onExtend: () -> Unit,
-    onShorten: () -> Unit
+    onShorten: () -> Unit,
+    onRegenerate: () -> Unit,
+    onRegenerateWithNewSeed: () -> Unit
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(12.dp)) {
             Text(text = scene.label)
             Text(text = "Start: ${"%.1f".format(scene.startTimeSeconds)}s  Ende: ${"%.1f".format(scene.endTimeSeconds)}s")
+
+            if (isComfyUiMode) {
+                Text(text = "Status: ${statusLabel(scene.generationStatus)}")
+                if (scene.generationStatus == GenerationStatus.FAILED.name && scene.generationErrorMessage != null) {
+                    Text(text = scene.generationErrorMessage)
+                }
+            }
+
             OutlinedTextField(
                 value = scene.prompt,
                 onValueChange = onPromptChange,
@@ -116,6 +134,27 @@ private fun SceneRow(
                 Button(onClick = onExtend) { Text("+1s") }
                 Button(onClick = onShorten) { Text("-1s") }
             }
+            if (isComfyUiMode) {
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Button(onClick = onRegenerate) {
+                        Icon(Icons.Filled.Refresh, contentDescription = "Neu generieren")
+                        Text(" Neu generieren")
+                    }
+                    Button(onClick = onRegenerateWithNewSeed) {
+                        Text("Neu mit anderem Seed")
+                    }
+                }
+            }
         }
+    }
+}
+
+private fun statusLabel(status: String): String {
+    return when (status) {
+        GenerationStatus.NOT_GENERATED.name -> "Noch nicht generiert"
+        GenerationStatus.GENERATING.name -> "Wird generiert"
+        GenerationStatus.GENERATED.name -> "Fertig generiert"
+        GenerationStatus.FAILED.name -> "Fehlgeschlagen"
+        else -> status
     }
 }
