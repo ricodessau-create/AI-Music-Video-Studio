@@ -1,9 +1,11 @@
 package com.example.aivideostudio.ui.home
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -86,11 +88,11 @@ private fun ProjectRow(project: ProjectEntity, onClick: () -> Unit, onDelete: ()
             .padding(horizontal = 12.dp)
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
-            androidx.compose.foundation.layout.Row(
+            Row(
                 modifier = Modifier.fillMaxSize(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Column(modifier = Modifier.clickableColumn(onClick)) {
+                Column(modifier = Modifier.clickable(onClick = onClick)) {
                     Text(text = project.name)
                     Text(text = "${project.aspectRatio} • ${project.resolutionWidth}x${project.resolutionHeight}")
                     Text(text = "BPM: ${project.bpm.toInt()}")
@@ -101,10 +103,4 @@ private fun ProjectRow(project: ProjectEntity, onClick: () -> Unit, onDelete: ()
             }
         }
     }
-}
-
-private fun Modifier.clickableColumn(onClick: () -> Unit): Modifier {
-    return this.then(
-        androidx.compose.foundation.clickable(onClick = onClick)
-    )
 }
