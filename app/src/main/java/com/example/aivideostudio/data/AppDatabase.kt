@@ -1,34 +1,31 @@
-package com.example.aivideostudio.comfyui
+package com.example.aivideostudio.data
 
-enum class WorkflowMediaType {
-    IMAGE,
-    VIDEO
-}
+import android.content.Context
+import androidx.room.Database
+import androidx.room.Room
+import androidx.room.RoomDatabase
 
-data class StoredWorkflow(
-    val id: String,
-    val name: String,
-    val mediaType: WorkflowMediaType,
-    val workflowFileName: String,
-    val supportsNegativePrompt: Boolean,
-    val supportsSeed: Boolean,
-    val supportsWidthHeight: Boolean,
-    val supportsSteps: Boolean,
-    val supportsCfg: Boolean,
-    val supportsFrames: Boolean,
-    val supportsFps: Boolean,
-    val supportsReferenceImage: Boolean
+@Database(
+    entities = [ProjectEntity::class, SceneEntity::class],
+    version = 2,
+    exportSchema = false
 )
+abstract class AppDatabase : RoomDatabase() {
 
-object WorkflowPlaceholders {
-    const val PROMPT = "{{PROMPT}}"
-    const val NEGATIVE_PROMPT = "{{NEGATIVE_PROMPT}}"
-    const val SEED = "{{SEED}}"
-    const val WIDTH = "{{WIDTH}}"
-    const val HEIGHT = "{{HEIGHT}}"
-    const val STEPS = "{{STEPS}}"
-    const val CFG = "{{CFG}}"
-    const val FRAMES = "{{FRAMES}}"
-    const val FPS = "{{FPS}}"
-    const val REFERENCE_IMAGE = "{{REFERENCE_IMAGE}}"
+    abstract fun projectDao(): ProjectDao
+
+    companion object {
+        @Volatile
+        private var instance: AppDatabase? = null
+
+        fun getInstance(context: Context): AppDatabase {
+            return instance ?: synchronized(this) {
+                instance ?: Room.databaseBuilder(
+                    context.applicationContext,
+                    AppDatabase::class.java,
+                    "ai_video_studio.db"
+                ).fallbackToDestructiveMigration().build().also { instance = it }
+            }
+        }
+    }
 }
