@@ -20,6 +20,8 @@ data class GeneratedScene(
 
 class StoryboardGenerator {
 
+    private val minimumSectionSeconds = 3.0
+
     fun generate(
         projectId: String,
         audioFeatures: AudioFeatures,
@@ -71,8 +73,8 @@ class StoryboardGenerator {
         val duration = audioFeatures.durationSeconds
         val bars = audioFeatures.barTimestamps.ifEmpty { listOf(0.0, duration) }
 
-        val boundaries = ArrayList<Double>()
-        boundaries.add(0.0)
+        val rawBoundaries = ArrayList<Double>()
+        rawBoundaries.add(0.0)
 
         val targetSectionCount = when {
             duration < 120 -> 6
@@ -85,14 +87,16 @@ class StoryboardGenerator {
         while (accumulator < bars.size) {
             val index = accumulator.toInt().coerceIn(0, bars.size - 1)
             val time = bars[index]
-            if (boundaries.last() < time) {
-                boundaries.add(time)
+            if (rawBoundaries.last() < time) {
+                rawBoundaries.add(time)
             }
             accumulator += step
         }
-        if (boundaries.last() < duration) {
-            boundaries.add(duration)
+        if (rawBoundaries.last() < duration) {
+            rawBoundaries.add(duration)
         }
+
+        val boundaries = mergeShortSections(rawBoundaries, duration)
 
         val labels = listOf("Intro", "Szene 1", "Szene 2", "Pre-Chorus", "Chorus", "Breakdown", "Solo", "Chorus", "Szene 3", "Outro")
         val sections = ArrayList<SectionMarker>()
@@ -104,6 +108,25 @@ class StoryboardGenerator {
             sections[sections.size - 1] = sections.last().copy(label = "Outro")
         }
         return sections
+    }
+
+    private fun mergeShortSections(rawBoundaries: List<Double>, duration: Double): List<Double> {
+        if (rawBoundaries.size < 2) return listOf(0.0, duration)
+
+        val filtered = ArrayList<Double>()
+        filtered.add(rawBoundaries.first())
+        for (i in 1 until rawBoundaries.size) {
+            val candidate = rawBoundaries[i]
+            val isLastBoundary = i == rawBoundaries.size - 1
+            if (isLastBoundary || candidate - filtered.last() >= minimumSectionSeconds) {
+                filtered.add(candidate)
+            }
+        }
+
+        if (filtered.size < 2) {
+            return listOf(0.0, duration)
+        }
+        return filtered
     }
 
     private fun buildEffectsForSection(label: String, visual: VisualParameters): List<String> {
