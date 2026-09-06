@@ -3,6 +3,7 @@ package com.example.aivideostudio.render
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMuxer
+import com.example.aivideostudio.audio.PcmAudioDecoder
 import java.io.File
 import java.nio.ByteBuffer
 
@@ -13,11 +14,34 @@ class AudioVideoMuxer(
 ) {
 
     fun mux() {
+        val tempAacAudioFile = File(outputFile.parentFile, "temp_audio_${System.currentTimeMillis()}.m4a")
+
+        try {
+            transcodeAudioToAac(tempAacAudioFile)
+            muxVideoAndAac(tempAacAudioFile)
+        } finally {
+            if (tempAacAudioFile.exists()) {
+                tempAacAudioFile.delete()
+            }
+        }
+    }
+
+    private fun transcodeAudioToAac(targetFile: File) {
+        val decoded = PcmAudioDecoder(originalAudioFilePath).decode()
+        val encoder = PcmToAacEncoder(
+            outputFile = targetFile,
+            sampleRate = decoded.sampleRate,
+            channelCount = decoded.channelCount
+        )
+        encoder.encode(decoded.samples)
+    }
+
+    private fun muxVideoAndAac(aacAudioFile: File) {
         val videoExtractor = MediaExtractor()
         videoExtractor.setDataSource(videoOnlyFile.absolutePath)
 
         val audioExtractor = MediaExtractor()
-        audioExtractor.setDataSource(originalAudioFilePath)
+        audioExtractor.setDataSource(aacAudioFile.absolutePath)
 
         val muxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
 
@@ -25,7 +49,7 @@ class AudioVideoMuxer(
         val audioTrackIndex = selectTrack(audioExtractor, "audio/")
 
         require(videoTrackIndex >= 0) { "Keine Videospur im Rohvideo gefunden" }
-        require(audioTrackIndex >= 0) { "Keine Audiospur in der Quelldatei gefunden" }
+        require(audioTrackIndex >= 0) { "Keine Audiospur nach der Umwandlung gefunden" }
 
         videoExtractor.selectTrack(videoTrackIndex)
         audioExtractor.selectTrack(audioTrackIndex)
