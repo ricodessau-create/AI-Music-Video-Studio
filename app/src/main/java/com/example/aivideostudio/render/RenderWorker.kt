@@ -16,6 +16,7 @@ import com.example.aivideostudio.data.RenderPresets
 import com.example.aivideostudio.data.SceneEntity
 import com.example.aivideostudio.storyboard.GeneratedScene
 import com.example.aivideostudio.storyboard.VisualPromptAnalyzer
+import com.example.aivideostudio.util.RenderErrorLogger
 import java.io.File
 
 class RenderWorker(context: Context, parameters: WorkerParameters) : CoroutineWorker(context, parameters) {
@@ -181,6 +182,9 @@ class RenderWorker(context: Context, parameters: WorkerParameters) : CoroutineWo
                     }
                     is RenderProgress.Failed -> {
                         failureMessage = progress.message
+                        if (progress.throwable != null) {
+                            RenderErrorLogger.logRenderFailure(applicationContext, progress.throwable, "VideoRenderPipeline")
+                        }
                     }
                     is RenderProgress.Completed -> {
                         outputPath = progress.outputFilePath
@@ -196,6 +200,7 @@ class RenderWorker(context: Context, parameters: WorkerParameters) : CoroutineWo
                 Result.failure(workDataOf(KEY_ERROR_MESSAGE to "Rendern wurde abgebrochen."))
             }
         } catch (exception: Exception) {
+            RenderErrorLogger.logRenderFailure(applicationContext, exception, "RenderWorker.doWork")
             Result.failure(workDataOf(KEY_ERROR_MESSAGE to (exception.message ?: "Audio konnte nicht analysiert werden.")))
         }
     }
