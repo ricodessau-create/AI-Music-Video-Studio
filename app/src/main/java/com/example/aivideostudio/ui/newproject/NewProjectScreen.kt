@@ -13,10 +13,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExposedDropdownMenu
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
@@ -125,9 +125,11 @@ fun NewProjectScreen(onProjectCreated: (String) -> Unit, viewModel: NewProjectVi
                     readOnly = true,
                     label = { Text("Auflösung") },
                     trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = resolutionExpanded) },
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .menuAnchor()
                 )
-                DropdownMenu(expanded = resolutionExpanded, onDismissRequest = { resolutionExpanded = false }) {
+                ExposedDropdownMenu(expanded = resolutionExpanded, onDismissRequest = { resolutionExpanded = false }) {
                     listOf("720p", "1080p", "4K").forEach { option ->
                         DropdownMenuItem(text = { Text(option) }, onClick = {
                             selectedResolution = option
@@ -144,9 +146,11 @@ fun NewProjectScreen(onProjectCreated: (String) -> Unit, viewModel: NewProjectVi
                     readOnly = true,
                     label = { Text("Seitenverhältnis") },
                     trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = aspectExpanded) },
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .menuAnchor()
                 )
-                DropdownMenu(expanded = aspectExpanded, onDismissRequest = { aspectExpanded = false }) {
+                ExposedDropdownMenu(expanded = aspectExpanded, onDismissRequest = { aspectExpanded = false }) {
                     listOf("16:9", "9:16", "1:1").forEach { option ->
                         DropdownMenuItem(text = { Text(option) }, onClick = {
                             selectedAspect = option
@@ -194,9 +198,11 @@ fun NewProjectScreen(onProjectCreated: (String) -> Unit, viewModel: NewProjectVi
                             readOnly = true,
                             label = { Text("ComfyUI-Workflow") },
                             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = workflowExpanded) },
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .menuAnchor()
                         )
-                        DropdownMenu(expanded = workflowExpanded, onDismissRequest = { workflowExpanded = false }) {
+                        ExposedDropdownMenu(expanded = workflowExpanded, onDismissRequest = { workflowExpanded = false }) {
                             availableWorkflows.forEach { workflow ->
                                 DropdownMenuItem(text = { Text(workflow.name) }, onClick = {
                                     selectedWorkflow = workflow
