@@ -14,6 +14,32 @@ class PcmAudioDecoder(private val filePath: String) {
         val durationMicros: Long
     )
 
+    private class GrowableFloatBuffer(initialCapacity: Int) {
+        private var backingArray = FloatArray(initialCapacity.coerceAtLeast(1024))
+        private var size = 0
+
+        fun append(value: Float) {
+            if (size >= backingArray.size) {
+                grow()
+            }
+            backingArray[size] = value
+            size++
+        }
+
+        private fun grow() {
+            val newCapacity = (backingArray.size.toLong() * 2L).coerceAtMost(Int.MAX_VALUE.toLong() - 8L).toInt()
+            val grownArray = FloatArray(newCapacity)
+            System.arraycopy(backingArray, 0, grownArray, 0, size)
+            backingArray = grownArray
+        }
+
+        fun toFloatArray(): FloatArray {
+            val trimmedArray = FloatArray(size)
+            System.arraycopy(backingArray, 0, trimmedArray, 0, size)
+            return trimmedArray
+        }
+    }
+
     fun decode(): DecodedAudio {
         val extractor = MediaExtractor()
         extractor.setDataSource(filePath)
@@ -49,7 +75,12 @@ class PcmAudioDecoder(private val filePath: String) {
         }
 
         val bufferInfo = MediaCodec.BufferInfo()
-        val outputSamples = ArrayList<Float>(sampleRate * 60)
+        val estimatedSampleCount = if (durationMicros > 0L) {
+            ((durationMicros / 1_000_000.0) * sampleRate * channelCount).toInt().coerceAtLeast(65536)
+        } else {
+            sampleRate * channelCount * 60
+        }
+        val outputSamples = GrowableFloatBuffer(estimatedSampleCount)
         var inputDone = false
         var outputDone = false
 
@@ -95,14 +126,14 @@ class PcmAudioDecoder(private val filePath: String) {
         )
     }
 
-    private fun appendPcmSamples(buffer: ByteBuffer, info: MediaCodec.BufferInfo, out: ArrayList<Float>) {
+    private fun appendPcmSamples(buffer: ByteBuffer, info: MediaCodec.BufferInfo, out: GrowableFloatBuffer) {
         buffer.position(info.offset)
         buffer.limit(info.offset + info.size)
         val shortBuffer = buffer.asShortBuffer()
         val shortCount = shortBuffer.remaining()
         for (i in 0 until shortCount) {
             val sample = shortBuffer.get(i)
-            out.add(sample / 32768.0f)
+            out.append(sample / 32768.0f)
         }
     }
 }
