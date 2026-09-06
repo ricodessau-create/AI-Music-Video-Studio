@@ -11,7 +11,7 @@ import java.io.File
 
 sealed class RenderProgress {
     data class InProgress(val currentFrame: Int, val totalFrames: Int, val currentSceneLabel: String) : RenderProgress()
-    data class Failed(val message: String) : RenderProgress()
+    data class Failed(val message: String, val throwable: Throwable? = null) : RenderProgress()
     data class Completed(val outputFilePath: String) : RenderProgress()
 }
 
@@ -143,7 +143,7 @@ class VideoRenderPipeline(
         } catch (outOfMemory: OutOfMemoryError) {
             onProgress(RenderProgress.Failed("Nicht genügend Speicherplatz."))
         } catch (exception: Exception) {
-            onProgress(RenderProgress.Failed(exception.message ?: "Rendern wurde abgebrochen."))
+            onProgress(RenderProgress.Failed(exception.message ?: "Rendern wurde abgebrochen.", exception))
         }
     }
 
