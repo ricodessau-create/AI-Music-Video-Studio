@@ -18,6 +18,7 @@ class AudioVideoMuxer(
 
         try {
             transcodeAudioToAac(tempAacAudioFile)
+            validateEncodedAudioFile(tempAacAudioFile)
             muxVideoAndAac(tempAacAudioFile)
         } finally {
             if (tempAacAudioFile.exists()) {
@@ -28,6 +29,7 @@ class AudioVideoMuxer(
 
     private fun transcodeAudioToAac(targetFile: File) {
         val decoded = PcmAudioDecoder(originalAudioFilePath).decode()
+        require(decoded.samples.isNotEmpty()) { "Audiodatei enthält keine lesbaren Audiodaten (leeres PCM-Ergebnis)." }
         val encoder = PcmToAacEncoder(
             outputFile = targetFile,
             sampleRate = decoded.sampleRate,
@@ -36,12 +38,34 @@ class AudioVideoMuxer(
         encoder.encode(decoded.samples)
     }
 
+    private fun validateEncodedAudioFile(file: File) {
+        if (!file.exists() || file.length() < 512L) {
+            throw IllegalStateException(
+                "Audioumwandlung nach AAC ist fehlgeschlagen: erzeugte Datei ist leer oder ungültig (${file.length()} Bytes)."
+            )
+        }
+    }
+
     private fun muxVideoAndAac(aacAudioFile: File) {
         val videoExtractor = MediaExtractor()
-        videoExtractor.setDataSource(videoOnlyFile.absolutePath)
+        try {
+            videoExtractor.setDataSource(videoOnlyFile.absolutePath)
+        } catch (exception: Exception) {
+            throw IllegalStateException(
+                "Konnte Rohvideo-Datei nicht öffnen (${videoOnlyFile.absolutePath}): ${exception.message}",
+                exception
+            )
+        }
 
         val audioExtractor = MediaExtractor()
-        audioExtractor.setDataSource(aacAudioFile.absolutePath)
+        try {
+            audioExtractor.setDataSource(aacAudioFile.absolutePath)
+        } catch (exception: Exception) {
+            throw IllegalStateException(
+                "Konnte umgewandelte Audiodatei nicht öffnen (${aacAudioFile.absolutePath}, ${aacAudioFile.length()} Bytes): ${exception.message}",
+                exception
+            )
+        }
 
         val muxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
 
