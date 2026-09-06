@@ -52,7 +52,25 @@ class SceneEditorViewModel(application: Application) : AndroidViewModel(applicat
     fun updateSceneTiming(scene: SceneEntity, startTime: Double, endTime: Double) {
         if (endTime <= startTime) return
         viewModelScope.launch {
+            val currentScenes = _scenes.value.sortedBy { it.orderIndex }
+            val sceneIndex = currentScenes.indexOfFirst { it.id == scene.id }
+            if (sceneIndex < 0) {
+                repository.updateScene(scene.copy(startTimeSeconds = startTime, endTimeSeconds = endTime))
+                return@launch
+            }
+
+            val nextScene = currentScenes.getOrNull(sceneIndex + 1)
+            val minimumNextDuration = 1.0
+
+            if (nextScene != null && endTime >= nextScene.endTimeSeconds - minimumNextDuration) {
+                return@launch
+            }
+
             repository.updateScene(scene.copy(startTimeSeconds = startTime, endTimeSeconds = endTime))
+
+            if (nextScene != null && nextScene.startTimeSeconds != endTime) {
+                repository.updateScene(nextScene.copy(startTimeSeconds = endTime))
+            }
         }
     }
 
