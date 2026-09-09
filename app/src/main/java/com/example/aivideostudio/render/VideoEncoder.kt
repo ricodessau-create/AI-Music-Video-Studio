@@ -148,11 +148,25 @@ class VideoEncoder(
         return v.toInt().coerceIn(0, 255).toByte()
     }
 
-    private fun drainEncoder(endOfStream: Boolean) {
-        if (endOfStream) {
-            encoder.signalEndOfInputStream()
+    private fun signalEndOfStreamViaBuffer() {
+        var inputIndex = -1
+        var waitAttempts = 0
+        while (inputIndex < 0 && waitAttempts < 1000) {
+            inputIndex = encoder.dequeueInputBuffer(10000)
+            if (inputIndex < 0) {
+                drainEncoder(false)
+                waitAttempts++
+            }
         }
 
+        if (inputIndex < 0) {
+            throw IllegalStateException("Encoder hat keinen Eingabepuffer für das Streamende bereitgestellt.")
+        }
+
+        encoder.queueInputBuffer(inputIndex, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+    }
+
+    private fun drainEncoder(endOfStream: Boolean) {
         val bufferInfo = MediaCodec.BufferInfo()
 
         while (true) {
@@ -183,6 +197,7 @@ class VideoEncoder(
     }
 
     fun finish() {
+        signalEndOfStreamViaBuffer()
         drainEncoder(true)
         encoder.stop()
         encoder.release()
