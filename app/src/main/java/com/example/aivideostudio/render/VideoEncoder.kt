@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.media.Image
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
+import android.media.MediaCodecList
 import android.media.MediaFormat
 import android.media.MediaMuxer
 import java.io.File
@@ -23,6 +24,9 @@ class VideoEncoder(
     private var muxerStarted = false
     private var writtenSampleCount = 0
     private var totalWrittenBytes = 0L
+    private var encodeFrameCallCount = 0
+    private var negotiatedColorFormat = -1
+    private var usedEncoderName = "unbekannt"
 
     private val pixelBuffer = IntArray(width * height)
 
@@ -33,14 +37,40 @@ class VideoEncoder(
         format.setInteger(MediaFormat.KEY_FRAME_RATE, frameRate)
         format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 2)
 
-        encoder = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
+        encoder = createPreferredEncoder()
         encoder.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
         encoder.start()
+
+        negotiatedColorFormat = try {
+            encoder.inputFormat.getInteger(MediaFormat.KEY_COLOR_FORMAT)
+        } catch (exception: Exception) {
+            -1
+        }
 
         muxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
     }
 
+    private fun createPreferredEncoder(): MediaCodec {
+        val preferredNames = listOf("c2.android.avc.encoder", "OMX.google.h264.encoder")
+        try {
+            val codecList = MediaCodecList(MediaCodecList.ALL_CODECS)
+            for (name in preferredNames) {
+                val info = codecList.codecInfos.firstOrNull { it.name == name && it.isEncoder }
+                if (info != null) {
+                    usedEncoderName = name
+                    return MediaCodec.createByCodecName(name)
+                }
+            }
+        } catch (exception: Exception) {
+            // Fällt unten auf den Standard-Encoder zurück
+        }
+        val fallback = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
+        usedEncoderName = fallback.name
+        return fallback
+    }
+
     fun encodeFrame(bitmap: Bitmap, presentationTimeUs: Long) {
+        encodeFrameCallCount++
         var inputIndex = -1
         var waitAttempts = 0
         while (inputIndex < 0 && waitAttempts < 1000) {
@@ -209,17 +239,21 @@ class VideoEncoder(
             encoder.stop()
         } catch (exception: Exception) {
             throw IllegalStateException(
-                "encoder.stop() ist fehlgeschlagen (bereits ${writtenSampleCount} Samples / ${totalWrittenBytes} Bytes geschrieben): ${exception.message}",
+                "encoder.stop() ist fehlgeschlagen (Encoder: $usedEncoderName, Farbformat: $negotiatedColorFormat, ${writtenSampleCount} Samples / ${totalWrittenBytes} Bytes, ${encodeFrameCallCount} Frame-Aufrufe): ${exception.message}",
                 exception
             )
         }
         encoder.release()
 
         if (!muxerStarted) {
-            throw IllegalStateException("Video-Encoder hat kein gültiges Ausgabeformat geliefert – es wurden keine Frames erfolgreich kodiert.")
+            throw IllegalStateException(
+                "Video-Encoder ($usedEncoderName, Farbformat: $negotiatedColorFormat) hat kein gültiges Ausgabeformat geliefert bei ${encodeFrameCallCount} Frame-Aufrufen."
+            )
         }
         if (writtenSampleCount == 0) {
-            throw IllegalStateException("Video-Encoder hat ein Ausgabeformat gemeldet, aber 0 Bild-Samples geschrieben (Codec-Fehler ohne Exception).")
+            throw IllegalStateException(
+                "Video-Encoder ($usedEncoderName, Farbformat: $negotiatedColorFormat) hat ein Ausgabeformat gemeldet, aber 0 von ${encodeFrameCallCount} Frames tatsächlich geschrieben."
+            )
         }
 
         try {
