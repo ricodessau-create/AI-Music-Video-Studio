@@ -29,6 +29,7 @@ class VideoEncoder(
     private var usedEncoderName = "unbekannt"
 
     private val pixelBuffer = IntArray(width * height)
+    private val fallbackFrameSize = width * height + 2 * (((width + 1) / 2) * ((height + 1) / 2))
 
     fun start() {
         val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, width, height)
@@ -85,11 +86,18 @@ class VideoEncoder(
             throw IllegalStateException("Encoder hat über einen langen Zeitraum keinen Eingabepuffer bereitgestellt.")
         }
 
+        val bufferCapacity = try {
+            encoder.getInputBuffer(inputIndex)?.capacity() ?: fallbackFrameSize
+        } catch (exception: Exception) {
+            fallbackFrameSize
+        }
+        val frameSize = if (bufferCapacity > 0) bufferCapacity else fallbackFrameSize
+
         val image = encoder.getInputImage(inputIndex)
             ?: throw IllegalStateException("Encoder liefert kein Image für den Eingabepuffer (Buffer-Modus nicht verfügbar).")
 
         fillImageFromBitmap(image, bitmap)
-        encoder.queueInputBuffer(inputIndex, 0, 0, presentationTimeUs, 0)
+        encoder.queueInputBuffer(inputIndex, 0, frameSize, presentationTimeUs, 0)
 
         drainEncoder(false)
     }
