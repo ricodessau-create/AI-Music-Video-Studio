@@ -27,8 +27,8 @@ class ParticleSystem(
     particleCount: Int
 ) {
 
-    private val particles = MutableList(particleCount) { createParticle() }
     private val random = Random(System.nanoTime())
+    private val particles = MutableList(particleCount) { createParticle() }
 
     private fun createParticle(): Particle {
         return when (type) {
