@@ -21,6 +21,8 @@ class VideoEncoder(
     private lateinit var muxer: MediaMuxer
     private var trackIndex = -1
     private var muxerStarted = false
+    private var writtenSampleCount = 0
+    private var totalWrittenBytes = 0L
 
     private val pixelBuffer = IntArray(width * height)
 
@@ -182,10 +184,13 @@ class VideoEncoder(
                 }
                 outputIndex >= 0 -> {
                     val encodedData: ByteBuffer? = encoder.getOutputBuffer(outputIndex)
-                    if (encodedData != null && bufferInfo.size > 0 && muxerStarted) {
+                    val isConfigFrame = bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0
+                    if (encodedData != null && bufferInfo.size > 0 && muxerStarted && !isConfigFrame) {
                         encodedData.position(bufferInfo.offset)
                         encodedData.limit(bufferInfo.offset + bufferInfo.size)
                         muxer.writeSampleData(trackIndex, encodedData, bufferInfo)
+                        writtenSampleCount++
+                        totalWrittenBytes += bufferInfo.size
                     }
                     encoder.releaseOutputBuffer(outputIndex, false)
                     if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) {
@@ -199,12 +204,38 @@ class VideoEncoder(
     fun finish() {
         signalEndOfStreamViaBuffer()
         drainEncoder(true)
-        encoder.stop()
+
+        try {
+            encoder.stop()
+        } catch (exception: Exception) {
+            throw IllegalStateException(
+                "encoder.stop() ist fehlgeschlagen (bereits ${writtenSampleCount} Samples / ${totalWrittenBytes} Bytes geschrieben): ${exception.message}",
+                exception
+            )
+        }
         encoder.release()
+
         if (!muxerStarted) {
             throw IllegalStateException("Video-Encoder hat kein gültiges Ausgabeformat geliefert – es wurden keine Frames erfolgreich kodiert.")
         }
-        muxer.stop()
+        if (writtenSampleCount == 0) {
+            throw IllegalStateException("Video-Encoder hat ein Ausgabeformat gemeldet, aber 0 Bild-Samples geschrieben (Codec-Fehler ohne Exception).")
+        }
+
+        try {
+            muxer.stop()
+        } catch (exception: Exception) {
+            throw IllegalStateException(
+                "muxer.stop() ist fehlgeschlagen (${writtenSampleCount} Samples / ${totalWrittenBytes} Bytes geschrieben): ${exception.message}",
+                exception
+            )
+        }
         muxer.release()
+
+        if (!outputFile.exists() || outputFile.length() < 1024L) {
+            throw IllegalStateException(
+                "Rohvideo-Datei ist nach dem Muxen ungültig oder zu klein: ${outputFile.length()} Bytes bei ${writtenSampleCount} geschriebenen Samples."
+            )
+        }
     }
 }
