@@ -1,5 +1,7 @@
 package com.example.aivideostudio.storyboard
 
+import kotlin.random.Random
+
 class ScenePromptGenerator {
 
     private val introTemplates = listOf(
@@ -38,6 +40,8 @@ class ScenePromptGenerator {
         "Ein letzter Blick auf das Schlachtfeld im schwindenden Licht."
     )
 
+    private val random = Random(System.nanoTime())
+
     fun generateScenePrompt(
         sectionLabel: String,
         sceneIndexInSection: Int,
@@ -45,7 +49,7 @@ class ScenePromptGenerator {
         userVisualPrompt: String
     ): String {
         val templates = templatesForSection(sectionLabel)
-        val template = templates[sceneIndexInSection % templates.size]
+        val template = templates[random.nextInt(templates.size)]
         return buildString {
             append(template)
             if (userVisualPrompt.isNotBlank()) {
