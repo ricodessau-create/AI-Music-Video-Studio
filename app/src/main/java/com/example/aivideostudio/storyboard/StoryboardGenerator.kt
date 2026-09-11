@@ -1,6 +1,7 @@
 package com.example.aivideostudio.storyboard
 
 import com.example.aivideostudio.audio.AudioFeatures
+import com.example.aivideostudio.audio.SongGenre
 import java.util.UUID
 import kotlin.random.Random
 
@@ -27,7 +28,8 @@ class StoryboardGenerator {
         audioFeatures: AudioFeatures,
         visualParameters: VisualParameters,
         basePrompt: String,
-        globalVisualStyle: String = ""
+        globalVisualStyle: String = "",
+        genre: SongGenre = SongGenre.OTHER
     ): List<GeneratedScene> {
         val sectionLabels = buildSectionLabels(audioFeatures)
         val scenes = ArrayList<GeneratedScene>()
@@ -36,9 +38,9 @@ class StoryboardGenerator {
         val songSeed = computeSongSeed(audioFeatures)
 
         for ((index, section) in sectionLabels.withIndex()) {
-            val effects = buildEffectsForSection(section.label, visualParameters)
-            val camera = pickCameraMovement(section.label, visualParameters, index)
-            val transition = pickTransition(section.label, visualParameters)
+            val effects = buildEffectsForSection(section.label, visualParameters, genre)
+            val camera = pickCameraMovement(section.label, visualParameters, genre, index)
+            val transition = pickTransition(visualParameters, genre)
             val intensity = computeIntensity(audioFeatures, section.startTime, section.endTime)
 
             val prompt = promptGenerator.generateScenePrompt(
@@ -139,7 +141,7 @@ class StoryboardGenerator {
         return filtered
     }
 
-    private fun buildEffectsForSection(label: String, visual: VisualParameters): List<String> {
+    private fun buildEffectsForSection(label: String, visual: VisualParameters, genre: SongGenre): List<String> {
         val effects = ArrayList<String>()
         if (visual.hasSnowParticles) effects.add("snow_particles")
         if (visual.hasFireParticles) effects.add("fire_particles")
@@ -149,7 +151,8 @@ class StoryboardGenerator {
         if (visual.hasLightning && (label == "Chorus" || label == "Breakdown")) effects.add("lightning_flash")
         effects.add("film_grain")
         effects.add("vignette")
-        if (label == "Chorus" || label == "Solo") {
+        val bassEmphasisGenre = genre == SongGenre.HIP_HOP || genre == SongGenre.METAL
+        if (label == "Chorus" || label == "Solo" || bassEmphasisGenre) {
             effects.add("bass_pulse")
             effects.add("beat_sync_zoom")
         }
@@ -157,15 +160,21 @@ class StoryboardGenerator {
         return effects
     }
 
-    private fun pickCameraMovement(label: String, visual: VisualParameters, index: Int): String {
+    private fun pickCameraMovement(label: String, visual: VisualParameters, genre: SongGenre, index: Int): String {
+        if (genre == SongGenre.BALLADE) {
+            return if (label == "Chorus") "slow_pan" else "static_with_parallax"
+        }
         if (label == "Breakdown") return "slow_pan"
         if (visual.cameraPace == "slow" && label != "Chorus" && label != "Solo") return "slow_pan"
+        if (genre == SongGenre.METAL && (label == "Chorus" || label == "Solo")) return "fast_zoom"
         if (label == "Chorus" || label == "Solo") return "fast_zoom"
         val cycle = listOf("pan_left", "pan_right", "zoom_in", "zoom_out", "static_with_parallax")
         return cycle[index % cycle.size]
     }
 
-    private fun pickTransition(label: String, visual: VisualParameters): String {
+    private fun pickTransition(visual: VisualParameters, genre: SongGenre): String {
+        if (genre == SongGenre.BALLADE || genre == SongGenre.POP) return "cross_fade"
+        if (genre == SongGenre.METAL) return "hard_cut"
         return if (visual.cutAggressiveness == "hard") "hard_cut" else "cross_fade"
     }
 
