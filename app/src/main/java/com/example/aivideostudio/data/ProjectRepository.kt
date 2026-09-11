@@ -1,6 +1,7 @@
 package com.example.aivideostudio.data
 
 import com.example.aivideostudio.audio.AudioFeatures
+import com.example.aivideostudio.audio.SongGenre
 import com.example.aivideostudio.storyboard.GeneratedScene
 import kotlinx.coroutines.flow.Flow
 import java.util.UUID
@@ -28,7 +29,9 @@ class ProjectRepository(private val database: AppDatabase) {
         globalVisualStyle: String,
         negativePrompt: String,
         characterReferenceImagePath: String?,
-        selectedWorkflowId: String?
+        selectedWorkflowId: String?,
+        manualGenre: SongGenre?,
+        detectedGenre: SongGenre
     ): String {
         val projectId = UUID.randomUUID().toString()
         val now = System.currentTimeMillis()
@@ -48,6 +51,8 @@ class ProjectRepository(private val database: AppDatabase) {
             negativePrompt = negativePrompt,
             characterReferenceImagePath = characterReferenceImagePath,
             selectedWorkflowId = selectedWorkflowId,
+            manualGenre = manualGenre?.name,
+            detectedGenre = detectedGenre.name,
             createdAtEpochMillis = now,
             updatedAtEpochMillis = now
         )
