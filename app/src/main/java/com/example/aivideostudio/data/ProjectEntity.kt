@@ -20,6 +20,8 @@ data class ProjectEntity(
     val negativePrompt: String,
     val characterReferenceImagePath: String?,
     val selectedWorkflowId: String?,
+    val manualGenre: String?,
+    val detectedGenre: String,
     val createdAtEpochMillis: Long,
     val updatedAtEpochMillis: Long
 )
