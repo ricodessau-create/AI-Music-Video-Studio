@@ -4,7 +4,9 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.aivideostudio.audio.BeatDetector
+import com.example.aivideostudio.audio.GenreEstimator
 import com.example.aivideostudio.audio.PcmAudioDecoder
+import com.example.aivideostudio.audio.SongGenre
 import com.example.aivideostudio.data.RenderMode
 import com.example.aivideostudio.data.RenderPresets
 import com.example.aivideostudio.di.ServiceLocator
@@ -42,7 +44,8 @@ class NewProjectViewModel(application: Application) : AndroidViewModel(applicati
         globalVisualStyle: String,
         negativePrompt: String,
         characterReferenceImagePath: String?,
-        selectedWorkflowId: String?
+        selectedWorkflowId: String?,
+        manualGenre: SongGenre?
     ) {
         viewModelScope.launch {
             _uiState.value = NewProjectUiState.Analyzing
@@ -51,6 +54,9 @@ class NewProjectViewModel(application: Application) : AndroidViewModel(applicati
                     val decoded = PcmAudioDecoder(songFilePath).decode()
                     BeatDetector(decoded.samples, decoded.sampleRate, decoded.channelCount).analyze()
                 }
+
+                val detectedGenre = GenreEstimator.estimate(audioFeatures)
+                val effectiveGenre = manualGenre ?: detectedGenre
 
                 val renderSettings = RenderPresets.forResolutionLabel(resolutionLabel, aspectRatio)
 
@@ -67,7 +73,9 @@ class NewProjectViewModel(application: Application) : AndroidViewModel(applicati
                     globalVisualStyle = globalVisualStyle,
                     negativePrompt = negativePrompt,
                     characterReferenceImagePath = characterReferenceImagePath,
-                    selectedWorkflowId = selectedWorkflowId
+                    selectedWorkflowId = selectedWorkflowId,
+                    manualGenre = manualGenre,
+                    detectedGenre = detectedGenre
                 )
 
                 val visualParameters = VisualPromptAnalyzer().analyze(visualPrompt)
@@ -76,7 +84,8 @@ class NewProjectViewModel(application: Application) : AndroidViewModel(applicati
                     audioFeatures = audioFeatures,
                     visualParameters = visualParameters,
                     basePrompt = visualPrompt,
-                    globalVisualStyle = globalVisualStyle
+                    globalVisualStyle = globalVisualStyle,
+                    genre = effectiveGenre
                 )
                 repository.saveScenes(projectId, scenes)
 
