@@ -32,7 +32,8 @@ class StoryboardGenerator {
         val sectionLabels = buildSectionLabels(audioFeatures)
         val scenes = ArrayList<GeneratedScene>()
         val promptGenerator = ScenePromptGenerator()
-        val random = Random(System.nanoTime())
+        val comfyUiSeedRandom = Random(System.nanoTime())
+        val songSeed = computeSongSeed(audioFeatures)
 
         for ((index, section) in sectionLabels.withIndex()) {
             val effects = buildEffectsForSection(section.label, visualParameters)
@@ -44,7 +45,9 @@ class StoryboardGenerator {
                 sectionLabel = section.label,
                 sceneIndexInSection = index,
                 globalVisualStyle = globalVisualStyle,
-                userVisualPrompt = basePrompt
+                userVisualPrompt = basePrompt,
+                songSeed = songSeed,
+                sceneIntensity = intensity
             )
 
             scenes.add(
@@ -59,12 +62,19 @@ class StoryboardGenerator {
                     transitionType = transition,
                     effects = effects,
                     intensity = intensity,
-                    seed = random.nextLong().let { if (it < 0) -it else it }
+                    seed = comfyUiSeedRandom.nextLong().let { if (it < 0) -it else it }
                 )
             )
         }
 
         return scenes
+    }
+
+    private fun computeSongSeed(audioFeatures: AudioFeatures): Int {
+        val bpmComponent = (audioFeatures.bpm * 100.0).toInt()
+        val durationComponent = (audioFeatures.durationSeconds * 10.0).toInt()
+        val beatCountComponent = audioFeatures.beatTimestamps.size
+        return bpmComponent * 31 + durationComponent * 17 + beatCountComponent
     }
 
     private data class SectionMarker(val label: String, val startTime: Double, val endTime: Double)
