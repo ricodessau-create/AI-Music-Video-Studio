@@ -1,6 +1,6 @@
 package com.example.aivideostudio.storyboard
 
-import kotlin.random.Random
+import kotlin.math.abs
 
 class ScenePromptGenerator {
 
@@ -40,16 +40,16 @@ class ScenePromptGenerator {
         "Ein letzter Blick auf das Schlachtfeld im schwindenden Licht."
     )
 
-    private val random = Random(System.nanoTime())
-
     fun generateScenePrompt(
         sectionLabel: String,
         sceneIndexInSection: Int,
         globalVisualStyle: String,
-        userVisualPrompt: String
+        userVisualPrompt: String,
+        songSeed: Int,
+        sceneIntensity: Float
     ): String {
         val templates = templatesForSection(sectionLabel)
-        val template = templates[random.nextInt(templates.size)]
+        val template = templates[selectTemplateIndex(templates.size, sceneIndexInSection, songSeed, sceneIntensity)]
         return buildString {
             append(template)
             if (userVisualPrompt.isNotBlank()) {
@@ -61,6 +61,18 @@ class ScenePromptGenerator {
                 append(globalVisualStyle)
             }
         }
+    }
+
+    private fun selectTemplateIndex(
+        templateCount: Int,
+        sceneIndexInSection: Int,
+        songSeed: Int,
+        sceneIntensity: Float
+    ): Int {
+        if (templateCount <= 1) return 0
+        val intensityComponent = (sceneIntensity * 1000f).toInt()
+        val combinedValue = songSeed + (sceneIndexInSection * 97) + intensityComponent
+        return abs(combinedValue) % templateCount
     }
 
     private fun templatesForSection(sectionLabel: String): List<String> {
