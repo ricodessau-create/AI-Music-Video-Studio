@@ -33,10 +33,23 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.aivideostudio.audio.SongGenre
 import com.example.aivideostudio.comfyui.StoredWorkflow
 import com.example.aivideostudio.comfyui.WorkflowRepository
 import com.example.aivideostudio.data.RenderMode
 import com.example.aivideostudio.util.FileCopyUtils
+
+private fun genreDisplayName(genre: SongGenre?): String {
+    return when (genre) {
+        null -> "Automatisch erkennen"
+        SongGenre.BALLADE -> "Ballade"
+        SongGenre.POP -> "Pop"
+        SongGenre.ROCK -> "Rock"
+        SongGenre.METAL -> "Metal"
+        SongGenre.HIP_HOP -> "Hip-Hop"
+        SongGenre.OTHER -> "Sonstiges"
+    }
+}
 
 @Composable
 fun NewProjectScreen(onProjectCreated: (String) -> Unit, viewModel: NewProjectViewModel = viewModel()) {
@@ -58,6 +71,8 @@ fun NewProjectScreen(onProjectCreated: (String) -> Unit, viewModel: NewProjectVi
     var workflowExpanded by remember { mutableStateOf(false) }
     var availableWorkflows by remember { mutableStateOf<List<StoredWorkflow>>(emptyList()) }
     var selectedWorkflow by remember { mutableStateOf<StoredWorkflow?>(null) }
+    var genreExpanded by remember { mutableStateOf(false) }
+    var selectedGenre by remember { mutableStateOf<SongGenre?>(null) }
 
     val workflowRepository = remember { WorkflowRepository() }
 
@@ -101,6 +116,29 @@ fun NewProjectScreen(onProjectCreated: (String) -> Unit, viewModel: NewProjectVi
             Button(onClick = { songPickerLauncher.launch("audio/*") }, modifier = Modifier.fillMaxWidth()) {
                 Text(if (selectedSongUri == null) "Song auswählen" else "Song ausgewählt")
             }
+
+            ExposedDropdownMenuBox(expanded = genreExpanded, onExpandedChange = { genreExpanded = it }) {
+                OutlinedTextField(
+                    value = genreDisplayName(selectedGenre),
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("Genre") },
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = genreExpanded) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .menuAnchor()
+                )
+                DropdownMenu(expanded = genreExpanded, onDismissRequest = { genreExpanded = false }) {
+                    val options = listOf<SongGenre?>(null, SongGenre.BALLADE, SongGenre.POP, SongGenre.ROCK, SongGenre.METAL, SongGenre.HIP_HOP)
+                    options.forEach { option ->
+                        DropdownMenuItem(text = { Text(genreDisplayName(option)) }, onClick = {
+                            selectedGenre = option
+                            genreExpanded = false
+                        })
+                    }
+                }
+            }
+            Text("Bei \"Automatisch erkennen\" schätzt die App das Genre grob anhand von Tempo und Energie des Songs. Das ist eine Heuristik, keine exakte Erkennung — bei Bedarf hier manuell überschreiben.")
 
             OutlinedTextField(
                 value = visualPrompt,
@@ -240,7 +278,8 @@ fun NewProjectScreen(onProjectCreated: (String) -> Unit, viewModel: NewProjectVi
                                 globalVisualStyle = globalVisualStyle,
                                 negativePrompt = negativePrompt,
                                 characterReferenceImagePath = localReferencePath,
-                                selectedWorkflowId = selectedWorkflow?.id
+                                selectedWorkflowId = selectedWorkflow?.id,
+                                manualGenre = selectedGenre
                             )
                         }
                     }
