@@ -38,6 +38,8 @@ import com.example.aivideostudio.comfyui.StoredWorkflow
 import com.example.aivideostudio.comfyui.WorkflowRepository
 import com.example.aivideostudio.data.RenderMode
 import com.example.aivideostudio.util.FileCopyUtils
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 private fun genreDisplayName(genre: SongGenre?): String {
     return when (genre) {
@@ -78,7 +80,9 @@ fun NewProjectScreen(onProjectCreated: (String) -> Unit, viewModel: NewProjectVi
 
     LaunchedEffect(renderMode) {
         if (renderMode == RenderMode.COMFYUI) {
-            availableWorkflows = workflowRepository.listWorkflows(context)
+            availableWorkflows = withContext(Dispatchers.IO) {
+                workflowRepository.listWorkflows(context)
+            }
         }
     }
 
@@ -227,7 +231,7 @@ fun NewProjectScreen(onProjectCreated: (String) -> Unit, viewModel: NewProjectVi
                 }
 
                 if (availableWorkflows.isEmpty()) {
-                    Text("Kein Workflow importiert. Workflows können nach Erstellung des Projekts in den Projekteinstellungen importiert werden.")
+                    Text("Kein Workflow importiert. Workflows können nach Erstellung des Projekts in den Projekteinstellungen (Zahnrad-Symbol im Szeneneditor) importiert werden.")
                 } else {
                     ExposedDropdownMenuBox(expanded = workflowExpanded, onExpandedChange = { workflowExpanded = it }) {
                         OutlinedTextField(
