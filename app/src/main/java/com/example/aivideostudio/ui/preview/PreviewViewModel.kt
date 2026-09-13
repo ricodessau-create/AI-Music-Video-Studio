@@ -6,6 +6,7 @@ import androidx.lifecycle.LiveData
 import androidx.lifecycle.Observer
 import androidx.lifecycle.viewModelScope
 import androidx.work.Data
+import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
@@ -29,29 +30,39 @@ class PreviewViewModel(application: Application) : AndroidViewModel(application)
     private val _uiState = MutableStateFlow<PreviewUiState>(PreviewUiState.Idle)
     val uiState: StateFlow<PreviewUiState> = _uiState.asStateFlow()
 
-    private var observedLiveData: LiveData<WorkInfo>? = null
-    private var currentObserver: Observer<WorkInfo>? = null
+    private var observedLiveData: LiveData<List<WorkInfo>>? = null
+    private var currentObserver: Observer<List<WorkInfo>>? = null
+    private var startedForProjectId: String? = null
 
-    fun startRender(projectId: String) {
+    fun startRender(projectId: String, forceRestart: Boolean = false) {
+        val uniqueWorkName = uniqueWorkNameFor(projectId)
+
+        if (!forceRestart && startedForProjectId == projectId && currentObserver != null) {
+            return
+        }
+        startedForProjectId = projectId
         clearObserver()
-        viewModelScope.launch {
-            _uiState.value = PreviewUiState.Rendering(0, "")
 
+        viewModelScope.launch {
             val inputData = Data.Builder()
                 .putString(RenderWorker.KEY_PROJECT_ID, projectId)
                 .build()
 
             val request = OneTimeWorkRequestBuilder<RenderWorker>()
                 .setInputData(inputData)
-                .addTag(RENDER_TAG_PREFIX + projectId)
+                .addTag(uniqueWorkName)
                 .build()
 
-            workManager.enqueue(request)
+            val existingPolicy = if (forceRestart) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP
+            workManager.enqueueUniqueWork(uniqueWorkName, existingPolicy, request)
 
-            val liveData = workManager.getWorkInfoByIdLiveData(request.id)
-            val observer = Observer<WorkInfo> { workInfo ->
-                if (workInfo == null) return@Observer
+            val liveData = workManager.getWorkInfosForUniqueWorkLiveData(uniqueWorkName)
+            val observer = Observer<List<WorkInfo>> { workInfos ->
+                val workInfo = workInfos?.firstOrNull() ?: return@Observer
                 when (workInfo.state) {
+                    WorkInfo.State.ENQUEUED -> {
+                        _uiState.value = PreviewUiState.Rendering(0, "Warten auf Start")
+                    }
                     WorkInfo.State.RUNNING -> {
                         val percent = workInfo.progress.getInt(RenderWorker.KEY_PROGRESS_PERCENT, 0)
                         val sceneLabel = workInfo.progress.getString(RenderWorker.KEY_CURRENT_SCENE) ?: ""
@@ -82,6 +93,12 @@ class PreviewViewModel(application: Application) : AndroidViewModel(application)
             liveData.observeForever(observer)
         }
     }
+
+    fun retryRender(projectId: String) {
+        startRender(projectId, forceRestart = true)
+    }
+
+    private fun uniqueWorkNameFor(projectId: String): String = RENDER_TAG_PREFIX + projectId
 
     private fun clearObserver() {
         val liveData = observedLiveData
