@@ -14,6 +14,7 @@ import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.IconButton
@@ -37,6 +38,7 @@ import com.example.aivideostudio.data.SceneEntity
 fun SceneEditorScreen(
     projectId: String,
     onOpenPreview: (String) -> Unit,
+    onOpenSettings: (String) -> Unit,
     viewModel: SceneEditorViewModel = viewModel()
 ) {
     LaunchedEffect(projectId) {
@@ -48,7 +50,16 @@ fun SceneEditorScreen(
     val isComfyUiMode = project?.renderMode == RenderMode.COMFYUI.name
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text(project?.name ?: "Storyboard") }) }
+        topBar = {
+            TopAppBar(
+                title = { Text(project?.name ?: "Storyboard") },
+                actions = {
+                    IconButton(onClick = { onOpenSettings(projectId) }) {
+                        Icon(Icons.Filled.Settings, contentDescription = "Projekteinstellungen")
+                    }
+                }
+            )
+        }
     ) { paddingValues ->
         Column(
             modifier = Modifier
