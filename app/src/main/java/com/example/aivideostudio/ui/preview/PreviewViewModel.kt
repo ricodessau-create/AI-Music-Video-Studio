@@ -2,6 +2,8 @@ package com.example.aivideostudio.ui.preview
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.LiveData
+import androidx.lifecycle.Observer
 import androidx.lifecycle.viewModelScope
 import androidx.work.Data
 import androidx.work.OneTimeWorkRequestBuilder
@@ -27,7 +29,11 @@ class PreviewViewModel(application: Application) : AndroidViewModel(application)
     private val _uiState = MutableStateFlow<PreviewUiState>(PreviewUiState.Idle)
     val uiState: StateFlow<PreviewUiState> = _uiState.asStateFlow()
 
+    private var observedLiveData: LiveData<WorkInfo>? = null
+    private var currentObserver: Observer<WorkInfo>? = null
+
     fun startRender(projectId: String) {
+        clearObserver()
         viewModelScope.launch {
             _uiState.value = PreviewUiState.Rendering(0, "")
 
@@ -42,8 +48,9 @@ class PreviewViewModel(application: Application) : AndroidViewModel(application)
 
             workManager.enqueue(request)
 
-            workManager.getWorkInfoByIdLiveData(request.id).observeForever { workInfo ->
-                if (workInfo == null) return@observeForever
+            val liveData = workManager.getWorkInfoByIdLiveData(request.id)
+            val observer = Observer<WorkInfo> { workInfo ->
+                if (workInfo == null) return@Observer
                 when (workInfo.state) {
                     WorkInfo.State.RUNNING -> {
                         val percent = workInfo.progress.getInt(RenderWorker.KEY_PROGRESS_PERCENT, 0)
@@ -69,7 +76,26 @@ class PreviewViewModel(application: Application) : AndroidViewModel(application)
                     else -> Unit
                 }
             }
+
+            observedLiveData = liveData
+            currentObserver = observer
+            liveData.observeForever(observer)
         }
+    }
+
+    private fun clearObserver() {
+        val liveData = observedLiveData
+        val observer = currentObserver
+        if (liveData != null && observer != null) {
+            liveData.removeObserver(observer)
+        }
+        observedLiveData = null
+        currentObserver = null
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        clearObserver()
     }
 
     companion object {
