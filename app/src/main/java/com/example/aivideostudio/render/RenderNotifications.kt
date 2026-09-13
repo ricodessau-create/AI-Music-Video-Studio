@@ -2,6 +2,7 @@ package com.example.aivideostudio.render
 
 import android.app.Notification
 import android.content.Context
+import android.content.pm.ServiceInfo
 import androidx.core.app.NotificationCompat
 import androidx.work.ForegroundInfo
 
@@ -23,6 +24,10 @@ object RenderNotifications {
 
     fun buildForegroundInfo(context: Context, contentText: String, progressPercent: Int): ForegroundInfo {
         val notification = buildNotification(context, contentText, progressPercent)
-        return ForegroundInfo(NOTIFICATION_ID, notification)
+        return ForegroundInfo(
+            NOTIFICATION_ID,
+            notification,
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+        )
     }
 }
