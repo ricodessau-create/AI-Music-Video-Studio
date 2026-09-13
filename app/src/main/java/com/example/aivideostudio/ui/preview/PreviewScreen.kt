@@ -45,16 +45,17 @@ fun PreviewScreen(projectId: String, onBack: () -> Unit, viewModel: PreviewViewM
                     Text("Bereite Rendern vor...")
                 }
                 is PreviewUiState.Rendering -> {
-                    Text("Rendere Szene: ${currentState.sceneLabel}")
+                    Text(currentState.sceneLabel)
                     LinearProgressIndicator(
                         progress = { currentState.percent / 100f },
                         modifier = Modifier.padding(top = 8.dp)
                     )
                     Text("${currentState.percent}%")
+                    Text("Das Rendern läuft im Hintergrund weiter, auch wenn du die App minimierst oder das Gerät drehst.")
                 }
                 is PreviewUiState.Failed -> {
                     Text(text = currentState.message)
-                    Button(onClick = { viewModel.startRender(projectId) }) {
+                    Button(onClick = { viewModel.retryRender(projectId) }) {
                         Text("Erneut versuchen")
                     }
                 }
