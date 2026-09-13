@@ -1,6 +1,7 @@
 package com.example.aivideostudio.render
 
 import android.content.Context
+import androidx.core.app.NotificationManagerCompat
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
@@ -25,6 +26,12 @@ class RenderWorker(context: Context, parameters: WorkerParameters) : CoroutineWo
         val projectId = inputData.getString(KEY_PROJECT_ID) ?: return Result.failure(
             workDataOf(KEY_ERROR_MESSAGE to "Ungültige Datei.")
         )
+
+        try {
+            setForeground(RenderNotifications.buildForegroundInfo(applicationContext, "Rendern wird vorbereitet", 0))
+        } catch (exception: Exception) {
+            // Falls der Vordergrunddienst nicht gestartet werden kann, läuft der Job dennoch als normaler Hintergrund-Worker weiter
+        }
 
         val database = AppDatabase.getInstance(applicationContext)
         val repository = ProjectRepository(database)
@@ -72,12 +79,15 @@ class RenderWorker(context: Context, parameters: WorkerParameters) : CoroutineWo
 
                 val sortedScenes = sceneEntities.sortedBy { it.orderIndex }
                 for ((index, scene) in sortedScenes.withIndex()) {
+                    val progressPercent = (index * 100) / sortedScenes.size
+                    val statusLabel = "Szene ${index + 1} von ${sortedScenes.size}: ${scene.label}"
                     setProgressAsync(
                         workDataOf(
-                            KEY_PROGRESS_PERCENT to ((index * 100) / sortedScenes.size),
-                            KEY_CURRENT_SCENE to "Szene ${index + 1} von ${sortedScenes.size}: ${scene.label}"
+                            KEY_PROGRESS_PERCENT to progressPercent,
+                            KEY_CURRENT_SCENE to statusLabel
                         )
                     )
+                    updateNotification(statusLabel, progressPercent)
 
                     val alreadyGenerated = scene.generationStatus == GenerationStatus.GENERATED.name &&
                         scene.generatedMediaPath != null &&
@@ -101,12 +111,14 @@ class RenderWorker(context: Context, parameters: WorkerParameters) : CoroutineWo
                         height = project.resolutionHeight,
                         characterReferenceImagePath = project.characterReferenceImagePath
                     ) { statusText ->
+                        val combinedLabel = "Szene ${index + 1} von ${sortedScenes.size}: $statusText"
                         setProgressAsync(
                             workDataOf(
-                                KEY_PROGRESS_PERCENT to ((index * 100) / sortedScenes.size),
-                                KEY_CURRENT_SCENE to "Szene ${index + 1} von ${sortedScenes.size}: $statusText"
+                                KEY_PROGRESS_PERCENT to progressPercent,
+                                KEY_CURRENT_SCENE to combinedLabel
                             )
                         )
+                        updateNotification(combinedLabel, progressPercent)
                     }
 
                     when (result) {
@@ -172,12 +184,14 @@ class RenderWorker(context: Context, parameters: WorkerParameters) : CoroutineWo
                         val percent = ((progress.currentFrame.toFloat() / progress.totalFrames.toFloat()) * 100).toInt()
                         if (percent != lastProgressPercent) {
                             lastProgressPercent = percent
+                            val label = "Rendering: ${progress.currentSceneLabel}"
                             setProgressAsync(
                                 workDataOf(
                                     KEY_PROGRESS_PERCENT to percent,
-                                    KEY_CURRENT_SCENE to "Rendering: ${progress.currentSceneLabel}"
+                                    KEY_CURRENT_SCENE to label
                                 )
                             )
+                            updateNotification(label, percent)
                         }
                     }
                     is RenderProgress.Failed -> {
@@ -202,6 +216,15 @@ class RenderWorker(context: Context, parameters: WorkerParameters) : CoroutineWo
         } catch (exception: Exception) {
             RenderErrorLogger.logRenderFailure(applicationContext, exception, "RenderWorker.doWork")
             Result.failure(workDataOf(KEY_ERROR_MESSAGE to (exception.message ?: "Audio konnte nicht analysiert werden.")))
+        }
+    }
+
+    private fun updateNotification(contentText: String, progressPercent: Int) {
+        try {
+            val notification = RenderNotifications.buildNotification(applicationContext, contentText, progressPercent)
+            NotificationManagerCompat.from(applicationContext).notify(RenderNotifications.NOTIFICATION_ID, notification)
+        } catch (exception: SecurityException) {
+            // Keine Benachrichtigungsberechtigung erteilt – der Renderjob läuft trotzdem weiter
         }
     }
 
