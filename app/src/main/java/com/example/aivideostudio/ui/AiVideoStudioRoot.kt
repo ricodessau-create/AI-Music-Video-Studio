@@ -9,15 +9,18 @@ import com.example.aivideostudio.ui.editor.SceneEditorScreen
 import com.example.aivideostudio.ui.home.ProjectListScreen
 import com.example.aivideostudio.ui.newproject.NewProjectScreen
 import com.example.aivideostudio.ui.preview.PreviewScreen
+import com.example.aivideostudio.ui.settings.ProjectSettingsScreen
 
 object AiVideoStudioDestinations {
     const val PROJECT_LIST = "project_list"
     const val NEW_PROJECT = "new_project"
     const val SCENE_EDITOR = "scene_editor/{projectId}"
     const val PREVIEW = "preview/{projectId}"
+    const val PROJECT_SETTINGS = "project_settings/{projectId}"
 
     fun sceneEditorRoute(projectId: String) = "scene_editor/$projectId"
     fun previewRoute(projectId: String) = "preview/$projectId"
+    fun projectSettingsRoute(projectId: String) = "project_settings/$projectId"
 }
 
 @Composable
@@ -43,18 +46,24 @@ fun AiVideoStudioRoot() {
             )
         }
         composable(AiVideoStudioDestinations.SCENE_EDITOR) { backStackEntry ->
-            val projectId = backStackEntry.arguments?.let {
-                it.toString()
-            }.orEmpty()
             SceneEditorScreen(
                 projectId = backStackEntry.arguments?.getString("projectId").orEmpty(),
                 onOpenPreview = { id ->
                     navController.navigate(AiVideoStudioDestinations.previewRoute(id))
+                },
+                onOpenSettings = { id ->
+                    navController.navigate(AiVideoStudioDestinations.projectSettingsRoute(id))
                 }
             )
         }
         composable(AiVideoStudioDestinations.PREVIEW) { backStackEntry ->
             PreviewScreen(
+                projectId = backStackEntry.arguments?.getString("projectId").orEmpty(),
+                onBack = { navController.popBackStack() }
+            )
+        }
+        composable(AiVideoStudioDestinations.PROJECT_SETTINGS) { backStackEntry ->
+            ProjectSettingsScreen(
                 projectId = backStackEntry.arguments?.getString("projectId").orEmpty(),
                 onBack = { navController.popBackStack() }
             )
