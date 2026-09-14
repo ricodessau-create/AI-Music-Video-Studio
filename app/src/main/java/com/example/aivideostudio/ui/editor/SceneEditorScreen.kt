@@ -1,5 +1,7 @@
 package com.example.aivideostudio.ui.editor
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -28,11 +30,13 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.aivideostudio.data.GenerationStatus
 import com.example.aivideostudio.data.RenderMode
 import com.example.aivideostudio.data.SceneEntity
+import com.example.aivideostudio.util.FileCopyUtils
 
 @Composable
 fun SceneEditorScreen(
@@ -41,6 +45,8 @@ fun SceneEditorScreen(
     onOpenSettings: (String) -> Unit,
     viewModel: SceneEditorViewModel = viewModel()
 ) {
+    val context = LocalContext.current
+
     LaunchedEffect(projectId) {
         viewModel.load(projectId)
     }
@@ -66,6 +72,13 @@ fun SceneEditorScreen(
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
+            if (!isComfyUiMode) {
+                Text(
+                    text = "Tipp: Ohne Hintergrundbild und ohne Wörter wie \"Schnee\", \"Feuer\" oder \"Rauch\" im Prompt bleibt eine Szene bewusst schlicht. Lade pro Szene ein Bild hoch, damit sie sichtbaren Inhalt zeigt.",
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                )
+            }
+
             LazyColumn(
                 modifier = Modifier
                     .weight(1f)
@@ -89,7 +102,14 @@ fun SceneEditorScreen(
                             viewModel.updateSceneTiming(scene, scene.startTimeSeconds, scene.endTimeSeconds - 1.0)
                         },
                         onRegenerate = { viewModel.regenerateScene(scene, useNewSeed = false) },
-                        onRegenerateWithNewSeed = { viewModel.regenerateScene(scene, useNewSeed = true) }
+                        onRegenerateWithNewSeed = { viewModel.regenerateScene(scene, useNewSeed = true) },
+                        onPickBackgroundImage = { uri ->
+                            val localPath = FileCopyUtils.copyUriToInternalStorage(context, uri, "scene_background_${scene.id}")
+                            if (localPath != null) {
+                                viewModel.updateSceneBackgroundImage(scene, localPath)
+                            }
+                        },
+                        onClearBackgroundImage = { viewModel.clearSceneBackgroundImage(scene) }
                     )
                 }
             }
@@ -118,8 +138,16 @@ private fun SceneRow(
     onExtend: () -> Unit,
     onShorten: () -> Unit,
     onRegenerate: () -> Unit,
-    onRegenerateWithNewSeed: () -> Unit
+    onRegenerateWithNewSeed: () -> Unit,
+    onPickBackgroundImage: (android.net.Uri) -> Unit,
+    onClearBackgroundImage: () -> Unit
 ) {
+    val imagePickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) {
+            onPickBackgroundImage(uri)
+        }
+    }
+
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(12.dp)) {
             Text(text = scene.label)
@@ -129,6 +157,18 @@ private fun SceneRow(
                 Text(text = "Status: ${statusLabel(scene.generationStatus)}")
                 if (scene.generationStatus == GenerationStatus.FAILED.name && scene.generationErrorMessage != null) {
                     Text(text = scene.generationErrorMessage)
+                }
+            } else {
+                Text(text = if (scene.backgroundImagePath != null) "Hintergrundbild ausgewählt" else "Kein Hintergrundbild")
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Button(onClick = { imagePickerLauncher.launch("image/*") }) {
+                        Text(if (scene.backgroundImagePath != null) "Bild ändern" else "Hintergrundbild wählen")
+                    }
+                    if (scene.backgroundImagePath != null) {
+                        Button(onClick = onClearBackgroundImage) {
+                            Text("Entfernen")
+                        }
+                    }
                 }
             }
 
