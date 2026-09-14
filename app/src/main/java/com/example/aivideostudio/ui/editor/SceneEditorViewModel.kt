@@ -49,6 +49,18 @@ class SceneEditorViewModel(application: Application) : AndroidViewModel(applicat
         }
     }
 
+    fun updateSceneBackgroundImage(scene: SceneEntity, imagePath: String) {
+        viewModelScope.launch {
+            repository.updateScene(scene.copy(backgroundImagePath = imagePath))
+        }
+    }
+
+    fun clearSceneBackgroundImage(scene: SceneEntity) {
+        viewModelScope.launch {
+            repository.updateScene(scene.copy(backgroundImagePath = null))
+        }
+    }
+
     fun updateSceneTiming(scene: SceneEntity, startTime: Double, endTime: Double) {
         if (endTime <= startTime) return
         viewModelScope.launch {
