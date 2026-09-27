@@ -51,7 +51,7 @@ fun PreviewScreen(projectId: String, onBack: () -> Unit, viewModel: PreviewViewM
                         modifier = Modifier.padding(top = 8.dp)
                     )
                     Text("${currentState.percent}%")
-                    Text("Das Rendern läuft im Hintergrund weiter, auch wenn du die App minimierst oder das Gerät drehst.")
+                    Text("Das Rendern läuft im Hintergrund weiter, auch wenn du die App minimierst.")
                 }
                 is PreviewUiState.Failed -> {
                     Text(text = currentState.message)
