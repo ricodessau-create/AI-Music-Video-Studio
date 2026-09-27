@@ -22,6 +22,9 @@ data class ProjectEntity(
     val selectedWorkflowId: String?,
     val manualGenre: String?,
     val detectedGenre: String,
+    val huggingFaceApiToken: String?,
+    val huggingFaceModelId: String?,
+    val huggingFaceSceneDurationSeconds: Double,
     val createdAtEpochMillis: Long,
     val updatedAtEpochMillis: Long
 )
