@@ -16,10 +16,10 @@ jobs:
           java-version: 17
       - name: Accept Android SDK licenses and install required packages
         run: |
-          SDKMANAGER_PATH=$(find "$ANDROID_HOME/cmdline-tools" -maxdepth 2 -name "sdkmanager" -type f 2>/dev/null | head -n 1)
+          SDKMANAGER_PATH=$(find "$ANDROID_HOME/cmdline-tools" -maxdepth 4 -name "sdkmanager" -type f 2>/dev/null | head -n 1)
           if [ -z "$SDKMANAGER_PATH" ]; then
             echo "sdkmanager wurde unter $ANDROID_HOME/cmdline-tools nicht gefunden"
-            find "$ANDROID_HOME" -maxdepth 4 -iname "sdkmanager*" 2>/dev/null
+            find "$ANDROID_HOME" -maxdepth 5 -iname "sdkmanager*" 2>/dev/null
             exit 1
           fi
           echo "Verwende sdkmanager unter: $SDKMANAGER_PATH"
