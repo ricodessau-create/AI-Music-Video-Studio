@@ -16,10 +16,15 @@ jobs:
           java-version: 17
       - name: Accept Android SDK licenses and install required packages
         run: |
-          yes | sdkmanager --licenses || true
-          sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
-        env:
-          ANDROID_HOME: /usr/local/lib/android/sdk
+          SDKMANAGER_PATH=$(find "$ANDROID_HOME/cmdline-tools" -maxdepth 2 -name "sdkmanager" -type f 2>/dev/null | head -n 1)
+          if [ -z "$SDKMANAGER_PATH" ]; then
+            echo "sdkmanager wurde unter $ANDROID_HOME/cmdline-tools nicht gefunden"
+            find "$ANDROID_HOME" -maxdepth 4 -iname "sdkmanager*" 2>/dev/null
+            exit 1
+          fi
+          echo "Verwende sdkmanager unter: $SDKMANAGER_PATH"
+          yes | "$SDKMANAGER_PATH" --licenses || true
+          "$SDKMANAGER_PATH" "platform-tools" "platforms;android-34" "build-tools;34.0.0"
       - uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: 8.7
