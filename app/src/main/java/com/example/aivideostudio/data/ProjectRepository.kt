@@ -31,7 +31,10 @@ class ProjectRepository(private val database: AppDatabase) {
         characterReferenceImagePath: String?,
         selectedWorkflowId: String?,
         manualGenre: SongGenre?,
-        detectedGenre: SongGenre
+        detectedGenre: SongGenre,
+        huggingFaceApiToken: String? = null,
+        huggingFaceModelId: String? = null,
+        huggingFaceSceneDurationSeconds: Double = 6.0
     ): String {
         val projectId = UUID.randomUUID().toString()
         val now = System.currentTimeMillis()
@@ -53,6 +56,9 @@ class ProjectRepository(private val database: AppDatabase) {
             selectedWorkflowId = selectedWorkflowId,
             manualGenre = manualGenre?.name,
             detectedGenre = detectedGenre.name,
+            huggingFaceApiToken = huggingFaceApiToken,
+            huggingFaceModelId = huggingFaceModelId,
+            huggingFaceSceneDurationSeconds = huggingFaceSceneDurationSeconds,
             createdAtEpochMillis = now,
             updatedAtEpochMillis = now
         )
@@ -64,12 +70,18 @@ class ProjectRepository(private val database: AppDatabase) {
         project: ProjectEntity,
         renderMode: RenderMode,
         comfyUiBaseUrl: String?,
-        selectedWorkflowId: String?
+        selectedWorkflowId: String?,
+        huggingFaceApiToken: String? = project.huggingFaceApiToken,
+        huggingFaceModelId: String? = project.huggingFaceModelId,
+        huggingFaceSceneDurationSeconds: Double = project.huggingFaceSceneDurationSeconds
     ) {
         val updated = project.copy(
             renderMode = renderMode.name,
             comfyUiBaseUrl = comfyUiBaseUrl,
             selectedWorkflowId = selectedWorkflowId,
+            huggingFaceApiToken = huggingFaceApiToken,
+            huggingFaceModelId = huggingFaceModelId,
+            huggingFaceSceneDurationSeconds = huggingFaceSceneDurationSeconds,
             updatedAtEpochMillis = System.currentTimeMillis()
         )
         database.projectDao().upsertProject(updated)
