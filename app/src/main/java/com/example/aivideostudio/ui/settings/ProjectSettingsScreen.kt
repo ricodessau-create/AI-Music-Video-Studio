@@ -61,6 +61,15 @@ fun ProjectSettingsScreen(
     var selectedWorkflowId by remember(project) {
         mutableStateOf(project?.selectedWorkflowId)
     }
+    var huggingFaceApiToken by remember(project) {
+        mutableStateOf(project?.huggingFaceApiToken ?: "")
+    }
+    var huggingFaceModelId by remember(project) {
+        mutableStateOf(project?.huggingFaceModelId ?: "")
+    }
+    var huggingFaceSceneDurationText by remember(project) {
+        mutableStateOf((project?.huggingFaceSceneDurationSeconds ?: 6.0).toString())
+    }
     var newWorkflowName by remember { mutableStateOf("Mein Workflow") }
     var newWorkflowMediaType by remember { mutableStateOf(WorkflowMediaType.IMAGE) }
     var mediaTypeExpanded by remember { mutableStateOf(false) }
@@ -81,11 +90,19 @@ fun ProjectSettingsScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text("Render-Modus")
-            Row {
-                RadioButton(selected = renderMode == RenderMode.OFFLINE, onClick = { renderMode = RenderMode.OFFLINE })
-                Text("Offline Renderer", modifier = Modifier.padding(top = 12.dp, end = 16.dp))
-                RadioButton(selected = renderMode == RenderMode.COMFYUI, onClick = { renderMode = RenderMode.COMFYUI })
-                Text("ComfyUI KI", modifier = Modifier.padding(top = 12.dp))
+            Column {
+                Row {
+                    RadioButton(selected = renderMode == RenderMode.OFFLINE, onClick = { renderMode = RenderMode.OFFLINE })
+                    Text("Offline Renderer", modifier = Modifier.padding(top = 12.dp, end = 16.dp))
+                }
+                Row {
+                    RadioButton(selected = renderMode == RenderMode.COMFYUI, onClick = { renderMode = RenderMode.COMFYUI })
+                    Text("ComfyUI KI (eigener Server nötig)", modifier = Modifier.padding(top = 12.dp))
+                }
+                Row {
+                    RadioButton(selected = renderMode == RenderMode.HUGGINGFACE, onClick = { renderMode = RenderMode.HUGGINGFACE })
+                    Text("Hugging Face KI (Cloud, eigener Account nötig)", modifier = Modifier.padding(top = 12.dp))
+                }
             }
 
             if (renderMode == RenderMode.COMFYUI) {
@@ -172,12 +189,39 @@ fun ProjectSettingsScreen(
                 }
             }
 
+            if (renderMode == RenderMode.HUGGINGFACE) {
+                Text("Kostenloser Hugging-Face-Account nötig (huggingface.co → Settings → Access Tokens).")
+                OutlinedTextField(
+                    value = huggingFaceApiToken,
+                    onValueChange = { huggingFaceApiToken = it },
+                    label = { Text("Hugging-Face-API-Token") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = huggingFaceModelId,
+                    onValueChange = { huggingFaceModelId = it },
+                    label = { Text("Modell-ID (z. B. Anbieter/Modellname von huggingface.co)") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = huggingFaceSceneDurationText,
+                    onValueChange = { huggingFaceSceneDurationText = it },
+                    label = { Text("Ziel-Szenenlänge in Sekunden") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text("Hinweis: Kostenlose Hugging-Face-Kontingente sind begrenzt und für Prototyping gedacht, nicht für unbegrenzte Nutzung.")
+            }
+
             Button(
                 onClick = {
+                    val parsedDuration = huggingFaceSceneDurationText.toDoubleOrNull() ?: 6.0
                     viewModel.saveSettings(
                         renderMode = renderMode,
                         comfyUiBaseUrl = if (renderMode == RenderMode.COMFYUI) comfyUiBaseUrl else null,
-                        selectedWorkflowId = if (renderMode == RenderMode.COMFYUI) selectedWorkflowId else null
+                        selectedWorkflowId = if (renderMode == RenderMode.COMFYUI) selectedWorkflowId else null,
+                        huggingFaceApiToken = if (renderMode == RenderMode.HUGGINGFACE) huggingFaceApiToken.ifBlank { null } else null,
+                        huggingFaceModelId = if (renderMode == RenderMode.HUGGINGFACE) huggingFaceModelId.ifBlank { null } else null,
+                        huggingFaceSceneDurationSeconds = parsedDuration
                     )
                     onBack()
                 },
