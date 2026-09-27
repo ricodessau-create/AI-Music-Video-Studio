@@ -72,14 +72,24 @@ class ProjectSettingsViewModel(application: Application) : AndroidViewModel(appl
         }
     }
 
-    fun saveSettings(renderMode: RenderMode, comfyUiBaseUrl: String?, selectedWorkflowId: String?) {
+    fun saveSettings(
+        renderMode: RenderMode,
+        comfyUiBaseUrl: String?,
+        selectedWorkflowId: String?,
+        huggingFaceApiToken: String?,
+        huggingFaceModelId: String?,
+        huggingFaceSceneDurationSeconds: Double
+    ) {
         viewModelScope.launch {
             val currentProject = _project.value ?: return@launch
             repository.updateProjectSettings(
                 project = currentProject,
                 renderMode = renderMode,
                 comfyUiBaseUrl = comfyUiBaseUrl,
-                selectedWorkflowId = selectedWorkflowId
+                selectedWorkflowId = selectedWorkflowId,
+                huggingFaceApiToken = huggingFaceApiToken,
+                huggingFaceModelId = huggingFaceModelId,
+                huggingFaceSceneDurationSeconds = huggingFaceSceneDurationSeconds
             )
             _project.value = repository.getProject(currentProjectId)
         }
