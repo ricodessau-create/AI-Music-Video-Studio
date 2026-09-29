@@ -13,6 +13,7 @@ data class SceneEntity(
     val endTimeSeconds: Double,
     val prompt: String,
     val backgroundImagePath: String?,
+    val referenceImagePath: String?,
     val cameraMovement: String,
     val transitionType: String,
     val effectsJson: String,
