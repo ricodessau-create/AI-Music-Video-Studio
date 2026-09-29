@@ -17,32 +17,65 @@ class AiSceneFrameSource(
     private var staticBitmap: Bitmap? = null
 
     fun prepare() {
+        release()
+
         when (mediaType) {
             GeneratedMediaType.IMAGE -> {
                 staticBitmap = decodeAndScale(filePath)
             }
+
             GeneratedMediaType.VIDEO -> {
                 val retriever = MediaMetadataRetriever()
                 retriever.setDataSource(filePath)
                 videoRetriever = retriever
-                val durationString = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
-                videoDurationMicros = (durationString?.toLongOrNull() ?: 0L) * 1000L
+
+                val durationString = retriever.extractMetadata(
+                    MediaMetadataRetriever.METADATA_KEY_DURATION
+                )
+
+                videoDurationMicros =
+                    (durationString?.toLongOrNull() ?: 0L) * 1000L
             }
+
             GeneratedMediaType.NONE -> Unit
         }
     }
 
     fun getFrameBitmapAtSceneProgress(sceneProgress: Float): Bitmap? {
         return when (mediaType) {
-            GeneratedMediaType.IMAGE -> staticBitmap
+            GeneratedMediaType.IMAGE -> {
+                val source = staticBitmap ?: return null
+                if (source.isRecycled) {
+                    null
+                } else {
+                    source.copy(Bitmap.Config.ARGB_8888, false)
+                }
+            }
+
             GeneratedMediaType.VIDEO -> {
                 val retriever = videoRetriever ?: return null
-                if (videoDurationMicros <= 0L) return null
-                val loopedProgress = sceneProgress % 1.0f
-                val targetTimeMicros = (loopedProgress * videoDurationMicros).toLong()
-                val frame = retriever.getFrameAtTime(targetTimeMicros, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
-                frame?.let { scaleBitmap(it) }
+
+                if (videoDurationMicros <= 0L) {
+                    return null
+                }
+
+                val loopedProgress =
+                    sceneProgress.coerceIn(0f, 1f)
+
+                val targetTimeMicros =
+                    (loopedProgress * videoDurationMicros).toLong()
+
+                val frame =
+                    retriever.getFrameAtTime(
+                        targetTimeMicros,
+                        MediaMetadataRetriever.OPTION_CLOSEST_SYNC
+                    )
+
+                frame?.let {
+                    scaleBitmap(it)
+                }
             }
+
             GeneratedMediaType.NONE -> null
         }
     }
@@ -50,21 +83,45 @@ class AiSceneFrameSource(
     fun release() {
         videoRetriever?.release()
         videoRetriever = null
-        staticBitmap?.recycle()
+
+        staticBitmap?.let {
+            if (!it.isRecycled) {
+                it.recycle()
+            }
+        }
+
         staticBitmap = null
+        videoDurationMicros = 0L
     }
 
     private fun decodeAndScale(path: String): Bitmap? {
-        val original = BitmapFactory.decodeFile(path) ?: return null
-        val scaled = scaleBitmap(original)
-        if (scaled != original) {
+        val original =
+            BitmapFactory.decodeFile(path)
+                ?: return null
+
+        val scaled =
+            scaleBitmap(original)
+
+        if (scaled !== original && !original.isRecycled) {
             original.recycle()
         }
+
         return scaled
     }
 
     private fun scaleBitmap(bitmap: Bitmap): Bitmap {
-        if (bitmap.width == outputWidth && bitmap.height == outputHeight) return bitmap
-        return Bitmap.createScaledBitmap(bitmap, outputWidth, outputHeight, true)
+        if (
+            bitmap.width == outputWidth &&
+            bitmap.height == outputHeight
+        ) {
+            return bitmap
+        }
+
+        return Bitmap.createScaledBitmap(
+            bitmap,
+            outputWidth,
+            outputHeight,
+            true
+        )
     }
 }
