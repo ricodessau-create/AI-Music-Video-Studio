@@ -53,7 +53,8 @@ fun SceneEditorScreen(
 
     val scenes by viewModel.scenes.collectAsState()
     val project by viewModel.project.collectAsState()
-    val isComfyUiMode = project?.renderMode == RenderMode.COMFYUI.name
+    val renderModeName = project?.renderMode
+    val isAiMode = renderModeName == RenderMode.COMFYUI.name || renderModeName == RenderMode.HUGGINGFACE.name
 
     Scaffold(
         topBar = {
@@ -72,9 +73,14 @@ fun SceneEditorScreen(
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
-            if (!isComfyUiMode) {
+            if (!isAiMode) {
                 Text(
-                    text = "Tipp: Ohne Hintergrundbild und ohne Wörter wie \"Schnee\", \"Feuer\" oder \"Rauch\" im Prompt bleibt eine Szene bewusst schlicht. Lade pro Szene ein Bild hoch, damit sie sichtbaren Inhalt zeigt.",
+                    text = "Tipp: Ohne Hintergrundbild und ohne Wörter wie \"Schnee\", \"Feuer\" oder \"Rauch\" im Prompt bleibt eine Szene bewusst schlicht.",
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                )
+            } else {
+                Text(
+                    text = "KI-Modus: Ein optionales Referenzbild pro Szene kann als visuelle Vorlage dienen (abhängig vom gewählten Workflow/Modell).",
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
                 )
             }
@@ -89,7 +95,7 @@ fun SceneEditorScreen(
                 items(scenes.sortedBy { it.orderIndex }) { scene ->
                     SceneRow(
                         scene = scene,
-                        isComfyUiMode = isComfyUiMode,
+                        isAiMode = isAiMode,
                         onPromptChange = { newPrompt -> viewModel.updateScenePrompt(scene, newPrompt) },
                         onDelete = { viewModel.deleteScene(scene) },
                         onDuplicate = { viewModel.duplicateScene(scene) },
@@ -109,7 +115,14 @@ fun SceneEditorScreen(
                                 viewModel.updateSceneBackgroundImage(scene, localPath)
                             }
                         },
-                        onClearBackgroundImage = { viewModel.clearSceneBackgroundImage(scene) }
+                        onClearBackgroundImage = { viewModel.clearSceneBackgroundImage(scene) },
+                        onPickReferenceImage = { uri ->
+                            val localPath = FileCopyUtils.copyUriToInternalStorage(context, uri, "scene_reference_${scene.id}")
+                            if (localPath != null) {
+                                viewModel.updateSceneReferenceImage(scene, localPath)
+                            }
+                        },
+                        onClearReferenceImage = { viewModel.clearSceneReferenceImage(scene) }
                     )
                 }
             }
@@ -129,7 +142,7 @@ fun SceneEditorScreen(
 @Composable
 private fun SceneRow(
     scene: SceneEntity,
-    isComfyUiMode: Boolean,
+    isAiMode: Boolean,
     onPromptChange: (String) -> Unit,
     onDelete: () -> Unit,
     onDuplicate: () -> Unit,
@@ -140,12 +153,15 @@ private fun SceneRow(
     onRegenerate: () -> Unit,
     onRegenerateWithNewSeed: () -> Unit,
     onPickBackgroundImage: (android.net.Uri) -> Unit,
-    onClearBackgroundImage: () -> Unit
+    onClearBackgroundImage: () -> Unit,
+    onPickReferenceImage: (android.net.Uri) -> Unit,
+    onClearReferenceImage: () -> Unit
 ) {
-    val imagePickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri != null) {
-            onPickBackgroundImage(uri)
-        }
+    val backgroundImagePickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) onPickBackgroundImage(uri)
+    }
+    val referenceImagePickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) onPickReferenceImage(uri)
     }
 
     Card(modifier = Modifier.fillMaxWidth()) {
@@ -153,21 +169,28 @@ private fun SceneRow(
             Text(text = scene.label)
             Text(text = "Start: ${"%.1f".format(scene.startTimeSeconds)}s  Ende: ${"%.1f".format(scene.endTimeSeconds)}s")
 
-            if (isComfyUiMode) {
+            if (isAiMode) {
                 Text(text = "Status: ${statusLabel(scene.generationStatus)}")
                 if (scene.generationStatus == GenerationStatus.FAILED.name && scene.generationErrorMessage != null) {
                     Text(text = scene.generationErrorMessage)
                 }
+                Text(text = if (scene.referenceImagePath != null) "Referenzbild ausgewählt" else "Kein Referenzbild")
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Button(onClick = { referenceImagePickerLauncher.launch("image/*") }) {
+                        Text(if (scene.referenceImagePath != null) "Referenzbild ändern" else "Referenzbild wählen")
+                    }
+                    if (scene.referenceImagePath != null) {
+                        Button(onClick = onClearReferenceImage) { Text("Entfernen") }
+                    }
+                }
             } else {
                 Text(text = if (scene.backgroundImagePath != null) "Hintergrundbild ausgewählt" else "Kein Hintergrundbild")
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Button(onClick = { imagePickerLauncher.launch("image/*") }) {
+                    Button(onClick = { backgroundImagePickerLauncher.launch("image/*") }) {
                         Text(if (scene.backgroundImagePath != null) "Bild ändern" else "Hintergrundbild wählen")
                     }
                     if (scene.backgroundImagePath != null) {
-                        Button(onClick = onClearBackgroundImage) {
-                            Text("Entfernen")
-                        }
+                        Button(onClick = onClearBackgroundImage) { Text("Entfernen") }
                     }
                 }
             }
@@ -186,7 +209,7 @@ private fun SceneRow(
                 Button(onClick = onExtend) { Text("+1s") }
                 Button(onClick = onShorten) { Text("-1s") }
             }
-            if (isComfyUiMode) {
+            if (isAiMode) {
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     Button(onClick = onRegenerate) {
                         Icon(Icons.Filled.Refresh, contentDescription = "Neu generieren")
