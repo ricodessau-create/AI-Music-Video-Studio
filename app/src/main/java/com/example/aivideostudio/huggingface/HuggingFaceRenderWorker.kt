@@ -14,8 +14,12 @@ import com.example.aivideostudio.data.ProjectRepository
 import com.example.aivideostudio.render.RenderNotifications
 import com.example.aivideostudio.util.RenderErrorLogger
 import java.io.File
+import kotlin.math.roundToInt
 
 class HuggingFaceRenderWorker(context: Context, parameters: WorkerParameters) : CoroutineWorker(context, parameters) {
+
+    private val targetFps = 8
+    private val maxFramesPerRequest = 64
 
     override suspend fun doWork(): Result {
         val projectId = inputData.getString(KEY_PROJECT_ID) ?: return Result.failure(
@@ -73,6 +77,8 @@ class HuggingFaceRenderWorker(context: Context, parameters: WorkerParameters) : 
                 scenes.sortedBy { it.orderIndex }
             }
 
+            val failedSceneLabels = ArrayList<String>()
+
             for ((index, scene) in scenesToProcess.withIndex()) {
                 val progressPercent = (index * 100) / scenesToProcess.size
                 val statusLabel = "Szene ${index + 1} von ${scenesToProcess.size}: ${scene.label}"
@@ -82,13 +88,22 @@ class HuggingFaceRenderWorker(context: Context, parameters: WorkerParameters) : 
                 repository.markSceneGenerating(scene)
 
                 val sceneDuration = (scene.endTimeSeconds - scene.startTimeSeconds).coerceAtLeast(1.0)
+                val idealFrameCount = (sceneDuration * targetFps).roundToInt()
+                val requestedFrameCount = idealFrameCount.coerceIn(8, maxFramesPerRequest)
+
+                val referenceNote = if (scene.referenceImagePath != null || project.characterReferenceImagePath != null) {
+                    " Hinweis: Ein Referenzbild wurde für diese Szene hinterlegt, wird aber vom aktuellen Hugging-Face-Text-zu-Video-Pfad nicht als Bildvorlage verwendet (nur als Text-Kontext), da keine verifizierte Bild-zu-Video-Schnittstelle verfügbar ist."
+                } else {
+                    ""
+                }
+
                 val requestParameters = HuggingFaceRequestParameters(
-                    prompt = scene.prompt,
+                    prompt = scene.prompt + referenceNote,
                     negativePrompt = project.negativePrompt,
-                    numFrames = 24,
-                    fps = 8,
-                    width = 512,
-                    height = 288
+                    numFrames = requestedFrameCount,
+                    fps = targetFps,
+                    width = project.resolutionWidth.coerceAtMost(768),
+                    height = project.resolutionHeight.coerceAtMost(432)
                 )
                 val targetFile = File(clipsDirectory, "${scene.id}.mp4")
 
@@ -99,32 +114,41 @@ class HuggingFaceRenderWorker(context: Context, parameters: WorkerParameters) : 
                     }
                     is HuggingFaceVideoResult.Failure -> {
                         repository.markSceneFailed(scene, result.message)
+                        failedSceneLabels.add("${scene.label} (${result.message})")
                     }
                     is HuggingFaceVideoResult.ModelLoading -> {
-                        repository.markSceneFailed(scene, "Hugging-Face-Modell lädt weiterhin, bitte später erneut versuchen.")
+                        val message = "Hugging-Face-Modell lädt weiterhin, bitte später erneut versuchen."
+                        repository.markSceneFailed(scene, message)
+                        failedSceneLabels.add("${scene.label} ($message)")
                     }
                 }
             }
 
             if (onlySceneId != null) {
-                return Result.success()
+                return if (failedSceneLabels.isEmpty()) {
+                    Result.success()
+                } else {
+                    Result.failure(workDataOf(KEY_ERROR_MESSAGE to failedSceneLabels.first()))
+                }
+            }
+
+            if (failedSceneLabels.isNotEmpty()) {
+                return Result.failure(
+                    workDataOf(
+                        KEY_ERROR_MESSAGE to "KI-Generierung für ${failedSceneLabels.size} von ${scenesToProcess.size} Szenen fehlgeschlagen: ${failedSceneLabels.joinToString("; ")}"
+                    )
+                )
             }
 
             setProgressAsync(workDataOf(KEY_PROGRESS_PERCENT to 90, KEY_CURRENT_SCENE to "Videoclips werden zusammengefügt"))
             updateNotification("Videoclips werden zusammengefügt", 90)
 
             val refreshedScenes = repository.getScenes(projectId).sortedBy { it.orderIndex }
-            val successfulScenes = refreshedScenes.filter {
-                it.generationStatus == GenerationStatus.GENERATED.name && it.generatedMediaPath != null
-            }
-
-            if (successfulScenes.isEmpty()) {
-                return Result.failure(workDataOf(KEY_ERROR_MESSAGE to "Keine Szene konnte erfolgreich generiert werden."))
-            }
-
-            val clipsToStitch = successfulScenes.map { entity ->
+            val clipsToStitch = refreshedScenes.map { entity ->
+                val path = entity.generatedMediaPath
+                    ?: return Result.failure(workDataOf(KEY_ERROR_MESSAGE to "Szene \"${entity.label}\" hat kein generiertes Video, Abbruch."))
                 ClipToStitch(
-                    filePath = entity.generatedMediaPath!!,
+                    filePath = path,
                     targetDurationSeconds = (entity.endTimeSeconds - entity.startTimeSeconds).coerceAtLeast(1.0),
                     width = project.resolutionWidth,
                     height = project.resolutionHeight
