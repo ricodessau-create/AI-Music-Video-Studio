@@ -32,19 +32,14 @@ class HuggingFaceClient(
                   "inputs": "$escapedPrompt",
                   "parameters": {
                     "num_frames": ${parameters.numFrames},
-                    "fps": ${parameters.fps},
-                    "width": ${parameters.width},
-                    "height": ${parameters.height}
-                  },
-                  "options": {
-                    "wait_for_model": false
+                    "negative_prompt": "${escapeJson(parameters.negativePrompt)}"
                   }
                 }
             """.trimIndent()
 
             val requestBody = payload.toRequestBody("application/json".toMediaType())
             val request = Request.Builder()
-                .url("https://api-inference.huggingface.co/models/$modelId")
+                .url("https://router.huggingface.co/hf-inference/models/$modelId")
                 .addHeader("Authorization", "Bearer $apiToken")
                 .post(requestBody)
                 .build()
@@ -59,7 +54,7 @@ class HuggingFaceClient(
                 if (!response.isSuccessful) {
                     val errorBody = response.body?.string().orEmpty()
                     return@withContext HuggingFaceVideoResult.Failure(
-                        "Hugging-Face-Anfrage fehlgeschlagen (${response.code}): ${errorBody.take(200)}"
+                        "Hugging-Face-Anfrage fehlgeschlagen (${response.code}) für Modell \"$modelId\" über hf-inference: ${errorBody.take(300)}"
                     )
                 }
 
@@ -80,7 +75,9 @@ class HuggingFaceClient(
                 if (textBody.contains("\"estimated_time\"")) {
                     HuggingFaceVideoResult.ModelLoading
                 } else {
-                    HuggingFaceVideoResult.Failure("Unerwartete Antwort von Hugging Face: ${textBody.take(200)}")
+                    HuggingFaceVideoResult.Failure(
+                        "Unerwartete Antwort von Hugging Face für Modell \"$modelId\" (evtl. nicht über hf-inference verfügbar, sondern nur über fal-ai/replicate): ${textBody.take(300)}"
+                    )
                 }
             }
         } catch (exception: Exception) {
