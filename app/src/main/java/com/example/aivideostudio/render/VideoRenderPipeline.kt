@@ -33,9 +33,14 @@ class VideoRenderPipeline(
         audioFeatures: AudioFeatures,
         backgroundImagePaths: Map<String, String>,
         aiGeneratedMedia: Map<String, SceneMediaInfo> = emptyMap(),
+        characterReferenceImagePath: String? = null,
         onProgress: (RenderProgress) -> Unit
     ) {
         try {
+            require(scenes.isNotEmpty()) {
+                "Keine Szenen für das Rendern vorhanden."
+            }
+
             val tempVideoFile = File(outputDirectory, "temp_video_$projectId.mp4")
             if (tempVideoFile.exists()) {
                 tempVideoFile.delete()
@@ -50,10 +55,25 @@ class VideoRenderPipeline(
             )
             encoder.start()
 
-            val frameRenderer = SceneFrameRenderer(renderSettings.resolutionWidth, renderSettings.resolutionHeight)
-            loadBitmaps(frameRenderer, backgroundImagePaths)
+            val frameRenderer = SceneFrameRenderer(
+                renderSettings.resolutionWidth,
+                renderSettings.resolutionHeight
+            )
+
+            val effectiveBackgroundPaths = HashMap(backgroundImagePaths)
+
+            if (!characterReferenceImagePath.isNullOrBlank()) {
+                for (scene in scenes) {
+                    if (!effectiveBackgroundPaths.containsKey(scene.id)) {
+                        effectiveBackgroundPaths[scene.id] = characterReferenceImagePath
+                    }
+                }
+            }
+
+            loadBitmaps(frameRenderer, effectiveBackgroundPaths)
 
             val aiFrameSources = HashMap<String, AiSceneFrameSource>()
+
             for ((sceneId, mediaInfo) in aiGeneratedMedia) {
                 val source = AiSceneFrameSource(
                     filePath = mediaInfo.filePath,
@@ -65,131 +85,293 @@ class VideoRenderPipeline(
                 aiFrameSources[sceneId] = source
             }
 
-            val totalDuration = audioFeatures.durationSeconds
-            val totalFrames = (totalDuration * renderSettings.frameRate).toInt().coerceAtLeast(1)
+            val totalDuration = audioFeatures.durationSeconds.coerceAtLeast(0.01)
+            val totalFrames = (totalDuration * renderSettings.frameRate)
+                .toInt()
+                .coerceAtLeast(1)
 
             val particleSystems = buildParticleSystems(visualParameters)
             var currentSceneIndex = 0
 
             for (frameNumber in 0 until totalFrames) {
-                val timeSeconds = frameNumber.toDouble() / renderSettings.frameRate.toDouble()
+                val timeSeconds =
+                    frameNumber.toDouble() / renderSettings.frameRate.toDouble()
 
-                while (currentSceneIndex < scenes.size - 1 && timeSeconds >= scenes[currentSceneIndex].endTimeSeconds) {
+                while (
+                    currentSceneIndex < scenes.size - 1 &&
+                    timeSeconds >= scenes[currentSceneIndex].endTimeSeconds
+                ) {
                     currentSceneIndex++
                 }
-                val scene = scenes[currentSceneIndex.coerceIn(0, scenes.size - 1)]
 
-                val sceneDuration = (scene.endTimeSeconds - scene.startTimeSeconds).coerceAtLeast(0.01)
-                val sceneProgress = ((timeSeconds - scene.startTimeSeconds) / sceneDuration).toFloat().coerceIn(0f, 1f)
+                val scene =
+                    scenes[currentSceneIndex.coerceIn(0, scenes.size - 1)]
 
-                val cameraController = CameraMotionController(scene.cameraMovement)
-                val cameraState = cameraController.computeState(sceneProgress, scene.intensity)
+                val sceneDuration =
+                    (scene.endTimeSeconds - scene.startTimeSeconds)
+                        .coerceAtLeast(0.01)
+
+                val sceneProgress =
+                    ((timeSeconds - scene.startTimeSeconds) / sceneDuration)
+                        .toFloat()
+                        .coerceIn(0f, 1f)
+
+                val cameraController =
+                    CameraMotionController(scene.cameraMovement)
+
+                val cameraState =
+                    cameraController.computeState(
+                        sceneProgress,
+                        scene.intensity
+                    )
 
                 val aiSource = aiFrameSources[scene.id]
-                val aiFrameOverride = aiSource?.getFrameBitmapAtSceneProgress(sceneProgress)
+
+                val aiFrameOverride =
+                    aiSource?.getFrameBitmapAtSceneProgress(sceneProgress)
 
                 val parallaxLayers = listOf(
-                    ParallaxLayer(bitmapKey = "background_${scene.id}", depthFactor = 0.3f),
-                    ParallaxLayer(bitmapKey = "background_${scene.id}", depthFactor = 0.6f),
-                    ParallaxLayer(bitmapKey = "background_${scene.id}", depthFactor = 1.0f)
+                    ParallaxLayer(
+                        bitmapKey = "background_${scene.id}",
+                        depthFactor = 0.3f
+                    ),
+                    ParallaxLayer(
+                        bitmapKey = "background_${scene.id}",
+                        depthFactor = 0.6f
+                    ),
+                    ParallaxLayer(
+                        bitmapKey = "background_${scene.id}",
+                        depthFactor = 1.0f
+                    )
                 )
-                val parallaxEngine = ParallaxEngine(parallaxLayers)
 
-                val particleSnapshots = HashMap<ParticleType, List<Particle>>()
+                val parallaxEngine =
+                    ParallaxEngine(parallaxLayers)
+
+                val particleSnapshots =
+                    HashMap<ParticleType, List<Particle>>()
+
                 for ((type, system) in particleSystems) {
-                    particleSnapshots[type] = system.update(1f / renderSettings.frameRate.toFloat(), scene.intensity)
+                    particleSnapshots[type] =
+                        system.update(
+                            1f / renderSettings.frameRate.toFloat(),
+                            scene.intensity
+                        )
                 }
 
-                val amplitude = sampleAmplitude(audioFeatures, timeSeconds)
+                val amplitude =
+                    sampleAmplitude(
+                        audioFeatures,
+                        timeSeconds
+                    )
 
-                val frameBitmap = frameRenderer.renderFrame(
-                    scene = scene,
-                    visualParameters = visualParameters,
-                    parallaxEngine = parallaxEngine,
-                    cameraState = cameraState,
-                    particleSnapshots = particleSnapshots,
-                    audioAmplitude = amplitude,
-                    backgroundKey = backgroundImagePaths[scene.id]?.let { "background_${scene.id}" },
-                    aiFrameOverride = aiFrameOverride
+                val frameBitmap =
+                    frameRenderer.renderFrame(
+                        scene = scene,
+                        visualParameters = visualParameters,
+                        parallaxEngine = parallaxEngine,
+                        cameraState = cameraState,
+                        particleSnapshots = particleSnapshots,
+                        audioAmplitude = amplitude,
+                        backgroundKey = effectiveBackgroundPaths[scene.id]
+                            ?.let { "background_${scene.id}" },
+                        aiFrameOverride = aiFrameOverride
+                    )
+
+                val presentationTimeUs =
+                    (timeSeconds * 1_000_000).toLong()
+
+                encoder.encodeFrame(
+                    frameBitmap,
+                    presentationTimeUs
                 )
 
-                val presentationTimeUs = (timeSeconds * 1_000_000).toLong()
-                encoder.encodeFrame(frameBitmap, presentationTimeUs)
                 frameBitmap.recycle()
 
-                onProgress(RenderProgress.InProgress(frameNumber, totalFrames, scene.label))
+                aiFrameOverride?.let {
+                    if (!it.isRecycled) {
+                        it.recycle()
+                    }
+                }
+
+                onProgress(
+                    RenderProgress.InProgress(
+                        currentFrame = frameNumber + 1,
+                        totalFrames = totalFrames,
+                        currentSceneLabel = scene.label
+                    )
+                )
             }
 
             encoder.finish()
             frameRenderer.recycle()
+
             for (source in aiFrameSources.values) {
                 source.release()
             }
 
-            val finalOutputFile = File(outputDirectory, "ai_music_video_$projectId.mp4")
+            val finalOutputFile =
+                File(
+                    outputDirectory,
+                    "ai_music_video_$projectId.mp4"
+                )
+
             if (finalOutputFile.exists()) {
                 finalOutputFile.delete()
             }
 
-            val muxer = AudioVideoMuxer(
-                videoOnlyFile = tempVideoFile,
-                originalAudioFilePath = songFilePath,
-                outputFile = finalOutputFile
-            )
+            val muxer =
+                AudioVideoMuxer(
+                    videoOnlyFile = tempVideoFile,
+                    originalAudioFilePath = songFilePath,
+                    outputFile = finalOutputFile
+                )
+
             muxer.mux()
+
             tempVideoFile.delete()
 
-            onProgress(RenderProgress.Completed(finalOutputFile.absolutePath))
+            onProgress(
+                RenderProgress.Completed(
+                    finalOutputFile.absolutePath
+                )
+            )
         } catch (outOfMemory: OutOfMemoryError) {
-            onProgress(RenderProgress.Failed("Nicht genügend Speicherplatz."))
+            onProgress(
+                RenderProgress.Failed(
+                    "Nicht genügend Arbeitsspeicher zum Rendern des Videos."
+                )
+            )
         } catch (exception: Exception) {
-            onProgress(RenderProgress.Failed(exception.message ?: "Rendern wurde abgebrochen.", exception))
+            onProgress(
+                RenderProgress.Failed(
+                    exception.message
+                        ?: "Rendern wurde abgebrochen.",
+                    exception
+                )
+            )
         }
     }
 
-    private fun loadBitmaps(frameRenderer: SceneFrameRenderer, backgroundImagePaths: Map<String, String>) {
+    private fun loadBitmaps(
+        frameRenderer: SceneFrameRenderer,
+        backgroundImagePaths: Map<String, String>
+    ) {
         for ((sceneId, path) in backgroundImagePaths) {
             val bitmap = decodeBitmapSafely(path)
+
             if (bitmap != null) {
-                frameRenderer.registerBitmap("background_$sceneId", bitmap)
+                frameRenderer.registerBitmap(
+                    "background_$sceneId",
+                    bitmap
+                )
             }
         }
     }
 
-    private fun decodeBitmapSafely(path: String): Bitmap? {
+    private fun decodeBitmapSafely(
+        path: String
+    ): Bitmap? {
         return try {
-            val options = BitmapFactory.Options()
-            options.inSampleSize = 1
-            BitmapFactory.decodeFile(path, options)
+            val file = File(path)
+
+            if (!file.exists() || !file.isFile || file.length() <= 0L) {
+                return null
+            }
+
+            val options = BitmapFactory.Options().apply {
+                inPreferredConfig = Bitmap.Config.ARGB_8888
+                inScaled = false
+            }
+
+            BitmapFactory.decodeFile(
+                file.absolutePath,
+                options
+            )
         } catch (exception: Exception) {
             null
         }
     }
 
-    private fun buildParticleSystems(visualParameters: VisualParameters): Map<ParticleType, ParticleSystem> {
-        val systems = HashMap<ParticleType, ParticleSystem>()
+    private fun buildParticleSystems(
+        visualParameters: VisualParameters
+    ): Map<ParticleType, ParticleSystem> {
+        val systems =
+            HashMap<ParticleType, ParticleSystem>()
+
         if (visualParameters.hasSnowParticles) {
-            systems[ParticleType.SNOW] = ParticleSystem(ParticleType.SNOW, renderSettings.resolutionWidth, renderSettings.resolutionHeight, 150)
+            systems[ParticleType.SNOW] =
+                ParticleSystem(
+                    ParticleType.SNOW,
+                    renderSettings.resolutionWidth,
+                    renderSettings.resolutionHeight,
+                    150
+                )
         }
+
         if (visualParameters.hasFireParticles) {
-            systems[ParticleType.FIRE] = ParticleSystem(ParticleType.FIRE, renderSettings.resolutionWidth, renderSettings.resolutionHeight, 80)
+            systems[ParticleType.FIRE] =
+                ParticleSystem(
+                    ParticleType.FIRE,
+                    renderSettings.resolutionWidth,
+                    renderSettings.resolutionHeight,
+                    80
+                )
         }
+
         if (visualParameters.hasRain) {
-            systems[ParticleType.RAIN] = ParticleSystem(ParticleType.RAIN, renderSettings.resolutionWidth, renderSettings.resolutionHeight, 200)
+            systems[ParticleType.RAIN] =
+                ParticleSystem(
+                    ParticleType.RAIN,
+                    renderSettings.resolutionWidth,
+                    renderSettings.resolutionHeight,
+                    200
+                )
         }
+
         if (visualParameters.hasSmoke) {
-            systems[ParticleType.SMOKE] = ParticleSystem(ParticleType.SMOKE, renderSettings.resolutionWidth, renderSettings.resolutionHeight, 40)
+            systems[ParticleType.SMOKE] =
+                ParticleSystem(
+                    ParticleType.SMOKE,
+                    renderSettings.resolutionWidth,
+                    renderSettings.resolutionHeight,
+                    40
+                )
         }
+
         return systems
     }
 
-    private fun sampleAmplitude(audioFeatures: AudioFeatures, timeSeconds: Double): Float {
-        if (audioFeatures.rmsEnergyCurve.isEmpty()) return 0f
-        val frameCount = audioFeatures.rmsEnergyCurve.size
-        val duration = audioFeatures.durationSeconds
-        if (duration <= 0.0) return 0f
-        val index = ((timeSeconds / duration) * frameCount).toInt().coerceIn(0, frameCount - 1)
-        val maxEnergy = audioFeatures.rmsEnergyCurve.max().coerceAtLeast(0.0001f)
-        return (audioFeatures.rmsEnergyCurve[index] / maxEnergy).coerceIn(0f, 1f)
+    private fun sampleAmplitude(
+        audioFeatures: AudioFeatures,
+        timeSeconds: Double
+    ): Float {
+        if (audioFeatures.rmsEnergyCurve.isEmpty()) {
+            return 0f
+        }
+
+        val frameCount =
+            audioFeatures.rmsEnergyCurve.size
+
+        val duration =
+            audioFeatures.durationSeconds
+
+        if (duration <= 0.0) {
+            return 0f
+        }
+
+        val index =
+            ((timeSeconds / duration) * frameCount)
+                .toInt()
+                .coerceIn(0, frameCount - 1)
+
+        val maxEnergy =
+            audioFeatures.rmsEnergyCurve
+                .max()
+                .coerceAtLeast(0.0001f)
+
+        return (
+            audioFeatures.rmsEnergyCurve[index] / maxEnergy
+            ).coerceIn(0f, 1f)
     }
 }
