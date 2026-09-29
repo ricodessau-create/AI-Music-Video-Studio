@@ -1,197 +1,138 @@
 package com.example.aivideostudio.storyboard
 
-import com.example.aivideostudio.audio.AudioFeatures
-import com.example.aivideostudio.audio.SongGenre
-import java.util.UUID
-import kotlin.random.Random
+import kotlin.math.abs
 
-data class GeneratedScene(
-    val id: String,
-    val orderIndex: Int,
-    val label: String,
-    val startTimeSeconds: Double,
-    val endTimeSeconds: Double,
-    val prompt: String,
-    val cameraMovement: String,
-    val transitionType: String,
-    val effects: List<String>,
-    val intensity: Float,
-    val seed: Long
-)
+class ScenePromptGenerator {
 
-class StoryboardGenerator {
+    private val introTemplates = listOf(
+        "Die Band steht geschlossen in einer rauen nordischen Landschaft, während Nebel und Sturm langsam aufziehen.",
+        "Die sechs Musiker stehen gemeinsam vor einer dunklen nordischen Berglandschaft im ersten Licht des Tages."
+    )
 
-    private val minimumSectionSeconds = 3.0
+    private val verseTemplates = listOf(
+        "Die Band bewegt sich gemeinsam durch eine raue nordische Landschaft, jedes Mitglied klar erkennbar und mit seinem individuellen Erscheinungsbild.",
+        "Mehrere Mitglieder der Band stehen gemeinsam im Zentrum der Szene und blicken entschlossen in die Ferne."
+    )
 
-    fun generate(
-        projectId: String,
-        audioFeatures: AudioFeatures,
-        visualParameters: VisualParameters,
-        basePrompt: String,
-        globalVisualStyle: String = "",
-        genre: SongGenre = SongGenre.OTHER
-    ): List<GeneratedScene> {
-        val sectionLabels = buildSectionLabels(audioFeatures)
-        val scenes = ArrayList<GeneratedScene>()
-        val promptGenerator = ScenePromptGenerator()
-        val comfyUiSeedRandom = Random(System.nanoTime())
-        val songSeed = computeSongSeed(audioFeatures)
+    private val preChorusTemplates = listOf(
+        "Die Spannung steigt, während die sechs Bandmitglieder gemeinsam vor dunklen Wolken stehen und der Sturm näher kommt.",
+        "Die Kamera nähert sich langsam der Band, deren Mitglieder gemeinsam vor einem dramatischen nordischen Himmel stehen."
+    )
 
-        for ((index, section) in sectionLabels.withIndex()) {
-            val effects = buildEffectsForSection(section.label, visualParameters, genre)
-            val camera = pickCameraMovement(section.label, visualParameters, genre, index)
-            val transition = pickTransition(visualParameters, genre)
-            val intensity = computeIntensity(audioFeatures, section.startTime, section.endTime)
+    private val chorusTemplates = listOf(
+        "Alle sechs Mitglieder der Band stehen gemeinsam in einer mächtigen Schildwall-Formation vor Sturm, Feuer und Rauch.",
+        "Die komplette Band steht gemeinsam vor einer dramatischen nordischen Landschaft, während Blitze und Feuer die Szene beleuchten.",
+        "Intensive Performance der gesamten Band mit allen sechs Mitgliedern, Feuer, Funken, Rauch und dramatischer Beleuchtung."
+    )
 
-            val prompt = promptGenerator.generateScenePrompt(
-                sectionLabel = section.label,
-                sceneIndexInSection = index,
-                globalVisualStyle = globalVisualStyle,
-                userVisualPrompt = basePrompt,
-                songSeed = songSeed,
-                sceneIntensity = intensity
-            )
+    private val breakdownTemplates = listOf(
+        "Die komplette Band steht in einer dunklen, vom Sturm gezeichneten Landschaft, Fackeln und Rauch bewegen sich im Wind.",
+        "Die sechs Bandmitglieder stehen gemeinsam im Schnee vor einer rauen nordischen Festung, während dichter Rauch im Hintergrund aufsteigt."
+    )
 
-            scenes.add(
-                GeneratedScene(
-                    id = UUID.randomUUID().toString(),
-                    orderIndex = index,
-                    label = section.label,
-                    startTimeSeconds = section.startTime,
-                    endTimeSeconds = section.endTime,
-                    prompt = prompt,
-                    cameraMovement = camera,
-                    transitionType = transition,
-                    effects = effects,
-                    intensity = intensity,
-                    seed = comfyUiSeedRandom.nextLong().let { if (it < 0) -it else it }
+    private val soloTemplates = listOf(
+        "Dynamische Performance der Band vor einer brennenden nordischen Landschaft mit Funken, Rauch und dramatischem Gegenlicht.",
+        "Nahaufnahme eines Bandmitglieds während der Performance, während die übrigen Mitglieder im Hintergrund klar erkennbar bleiben."
+    )
+
+    private val outroTemplates = listOf(
+        "Die komplette Band steht gemeinsam im aufziehenden Nebel, während der Sturm langsam nachlässt.",
+        "Ein letzter weiter Blick auf die sechs Bandmitglieder in der dunklen nordischen Landschaft im schwindenden Licht."
+    )
+
+    fun generateScenePrompt(
+        sectionLabel: String,
+        sceneIndexInSection: Int,
+        globalVisualStyle: String,
+        userVisualPrompt: String,
+        songSeed: Int,
+        sceneIntensity: Float
+    ): String {
+        val templates = templatesForSection(sectionLabel)
+
+        val template =
+            templates[
+                selectTemplateIndex(
+                    templates.size,
+                    sceneIndexInSection,
+                    songSeed,
+                    sceneIntensity
                 )
+            ]
+
+        return buildString {
+            append(template)
+
+            append(" ")
+
+            append(
+                "Die sechs festen Bandmitglieder müssen über alle Szenen hinweg " +
+                    "konsistent dargestellt werden. Gesichter, Haarfarben, Frisuren, " +
+                    "Bärte, Körperbau, Tätowierungen, Gesichtsbemalung, Kleidung und " +
+                    "Instrumente müssen sich an der bereitgestellten Bandreferenz orientieren. "
+            )
+
+            append(
+                "Keine neuen Personen, keine austauschbaren Charaktere, keine zufälligen " +
+                    "Gesichter und keine Veränderung der Identität der Bandmitglieder. "
+            )
+
+            append(
+                "Fotorealistisch, erwachsene Musiker, authentische dunkle Nordic-" +
+                    "Viking-Metal-Ästhetik, natürliche Hautdetails, realistische Haare " +
+                    "und Bärte, glaubwürdige Beleuchtung, keine Comic-Optik, keine " +
+                    "übertriebene High-Fantasy-Darstellung. "
+            )
+
+            if (userVisualPrompt.isNotBlank()) {
+                append(userVisualPrompt.trim())
+                append(" ")
+            }
+
+            if (globalVisualStyle.isNotBlank()) {
+                append(globalVisualStyle.trim())
+                append(" ")
+            }
+
+            append(
+                "Szene ${sceneIndexInSection + 1}, Intensität " +
+                    "${sceneIntensity.coerceIn(0f, 1f)}."
             )
         }
-
-        return scenes
     }
 
-    private fun computeSongSeed(audioFeatures: AudioFeatures): Int {
-        val bpmComponent = (audioFeatures.bpm * 100.0).toInt()
-        val durationComponent = (audioFeatures.durationSeconds * 10.0).toInt()
-        val beatCountComponent = audioFeatures.beatTimestamps.size
-        return bpmComponent * 31 + durationComponent * 17 + beatCountComponent
+    private fun selectTemplateIndex(
+        templateCount: Int,
+        sceneIndexInSection: Int,
+        songSeed: Int,
+        sceneIntensity: Float
+    ): Int {
+        if (templateCount <= 1) {
+            return 0
+        }
+
+        val intensityComponent =
+            (sceneIntensity * 1000f).toInt()
+
+        val combinedValue =
+            songSeed +
+                (sceneIndexInSection * 97) +
+                intensityComponent
+
+        return abs(combinedValue) % templateCount
     }
 
-    private data class SectionMarker(val label: String, val startTime: Double, val endTime: Double)
-
-    private fun buildSectionLabels(audioFeatures: AudioFeatures): List<SectionMarker> {
-        val duration = audioFeatures.durationSeconds
-        val bars = audioFeatures.barTimestamps.ifEmpty { listOf(0.0, duration) }
-
-        val rawBoundaries = ArrayList<Double>()
-        rawBoundaries.add(0.0)
-
-        val targetSectionCount = when {
-            duration < 120 -> 6
-            duration < 240 -> 8
-            else -> 10
+    private fun templatesForSection(
+        sectionLabel: String
+    ): List<String> {
+        return when (sectionLabel) {
+            "Intro" -> introTemplates
+            "Chorus" -> chorusTemplates
+            "Pre-Chorus" -> preChorusTemplates
+            "Breakdown" -> breakdownTemplates
+            "Solo" -> soloTemplates
+            "Outro" -> outroTemplates
+            else -> verseTemplates
         }
-
-        val step = bars.size.toDouble() / targetSectionCount.toDouble()
-        var accumulator = 0.0
-        while (accumulator < bars.size) {
-            val index = accumulator.toInt().coerceIn(0, bars.size - 1)
-            val time = bars[index]
-            if (rawBoundaries.last() < time) {
-                rawBoundaries.add(time)
-            }
-            accumulator += step
-        }
-        if (rawBoundaries.last() < duration) {
-            rawBoundaries.add(duration)
-        }
-
-        val boundaries = mergeShortSections(rawBoundaries, duration)
-
-        val labels = listOf("Intro", "Szene 1", "Szene 2", "Pre-Chorus", "Chorus", "Breakdown", "Solo", "Chorus", "Szene 3", "Outro")
-        val sections = ArrayList<SectionMarker>()
-        for (i in 0 until boundaries.size - 1) {
-            val label = labels.getOrElse(i) { "Szene ${i + 1}" }
-            sections.add(SectionMarker(label, boundaries[i], boundaries[i + 1]))
-        }
-        if (sections.isNotEmpty()) {
-            sections[sections.size - 1] = sections.last().copy(label = "Outro")
-        }
-        return sections
-    }
-
-    private fun mergeShortSections(rawBoundaries: List<Double>, duration: Double): List<Double> {
-        if (rawBoundaries.size < 2) return listOf(0.0, duration)
-
-        val filtered = ArrayList<Double>()
-        filtered.add(rawBoundaries.first())
-        for (i in 1 until rawBoundaries.size) {
-            val candidate = rawBoundaries[i]
-            val isLastBoundary = i == rawBoundaries.size - 1
-            if (isLastBoundary || candidate - filtered.last() >= minimumSectionSeconds) {
-                filtered.add(candidate)
-            }
-        }
-
-        if (filtered.size < 2) {
-            return listOf(0.0, duration)
-        }
-        return filtered
-    }
-
-    private fun buildEffectsForSection(label: String, visual: VisualParameters, genre: SongGenre): List<String> {
-        val effects = ArrayList<String>()
-        if (visual.hasSnowParticles) effects.add("snow_particles")
-        if (visual.hasFireParticles) effects.add("fire_particles")
-        if (visual.hasRuneOverlay) effects.add("rune_overlay")
-        if (visual.hasSmoke) effects.add("smoke")
-        if (visual.hasRain) effects.add("rain")
-        if (visual.hasLightning && (label == "Chorus" || label == "Breakdown")) effects.add("lightning_flash")
-        effects.add("film_grain")
-        effects.add("vignette")
-        val bassEmphasisGenre = genre == SongGenre.HIP_HOP || genre == SongGenre.METAL
-        if (label == "Chorus" || label == "Solo" || bassEmphasisGenre) {
-            effects.add("bass_pulse")
-            effects.add("beat_sync_zoom")
-        }
-        effects.add("waveform_overlay")
-        return effects
-    }
-
-    private fun pickCameraMovement(label: String, visual: VisualParameters, genre: SongGenre, index: Int): String {
-        if (genre == SongGenre.BALLADE) {
-            return if (label == "Chorus") "slow_pan" else "static_with_parallax"
-        }
-        if (label == "Breakdown") return "slow_pan"
-        if (visual.cameraPace == "slow" && label != "Chorus" && label != "Solo") return "slow_pan"
-        if (genre == SongGenre.METAL && (label == "Chorus" || label == "Solo")) return "fast_zoom"
-        if (label == "Chorus" || label == "Solo") return "fast_zoom"
-        val cycle = listOf("pan_left", "pan_right", "zoom_in", "zoom_out", "static_with_parallax")
-        return cycle[index % cycle.size]
-    }
-
-    private fun pickTransition(visual: VisualParameters, genre: SongGenre): String {
-        if (genre == SongGenre.BALLADE || genre == SongGenre.POP) return "cross_fade"
-        if (genre == SongGenre.METAL) return "hard_cut"
-        return if (visual.cutAggressiveness == "hard") "hard_cut" else "cross_fade"
-    }
-
-    private fun computeIntensity(audioFeatures: AudioFeatures, startTime: Double, endTime: Double): Float {
-        if (audioFeatures.rmsEnergyCurve.isEmpty()) return 0.5f
-        val frameCount = audioFeatures.rmsEnergyCurve.size
-        val duration = audioFeatures.durationSeconds
-        if (duration <= 0.0) return 0.5f
-        val startIndex = ((startTime / duration) * frameCount).toInt().coerceIn(0, frameCount - 1)
-        val endIndex = ((endTime / duration) * frameCount).toInt().coerceIn(startIndex, frameCount - 1)
-        if (endIndex <= startIndex) return audioFeatures.rmsEnergyCurve[startIndex]
-        var sum = 0f
-        for (i in startIndex..endIndex) {
-            sum += audioFeatures.rmsEnergyCurve[i]
-        }
-        val average = sum / (endIndex - startIndex + 1)
-        val maxEnergy = audioFeatures.rmsEnergyCurve.max().coerceAtLeast(0.0001f)
-        return (average / maxEnergy).coerceIn(0f, 1f)
     }
 }
