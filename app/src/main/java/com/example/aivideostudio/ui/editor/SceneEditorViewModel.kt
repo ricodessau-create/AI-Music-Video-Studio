@@ -62,21 +62,23 @@ class SceneEditorViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     fun updateScenePrompt(scene: SceneEntity, newPrompt: String) {
-        viewModelScope.launch {
-            repository.updateScene(scene.copy(prompt = newPrompt))
-        }
+        viewModelScope.launch { repository.updateScene(scene.copy(prompt = newPrompt)) }
     }
 
     fun updateSceneBackgroundImage(scene: SceneEntity, imagePath: String) {
-        viewModelScope.launch {
-            repository.updateScene(scene.copy(backgroundImagePath = imagePath))
-        }
+        viewModelScope.launch { repository.updateScene(scene.copy(backgroundImagePath = imagePath)) }
     }
 
     fun clearSceneBackgroundImage(scene: SceneEntity) {
-        viewModelScope.launch {
-            repository.updateScene(scene.copy(backgroundImagePath = null))
-        }
+        viewModelScope.launch { repository.updateScene(scene.copy(backgroundImagePath = null)) }
+    }
+
+    fun updateSceneReferenceImage(scene: SceneEntity, imagePath: String) {
+        viewModelScope.launch { repository.updateScene(scene.copy(referenceImagePath = imagePath)) }
+    }
+
+    fun clearSceneReferenceImage(scene: SceneEntity) {
+        viewModelScope.launch { repository.updateScene(scene.copy(referenceImagePath = null)) }
     }
 
     fun updateSceneTiming(scene: SceneEntity, startTime: Double, endTime: Double) {
@@ -149,9 +151,7 @@ class SceneEditorViewModel(application: Application) : AndroidViewModel(applicat
         clearObserver()
         _huggingFaceState.value = HuggingFaceGenerationState.Running(0, "Wird vorbereitet")
 
-        val inputData = Data.Builder()
-            .putString(HuggingFaceRenderWorker.KEY_PROJECT_ID, projectId)
-            .build()
+        val inputData = Data.Builder().putString(HuggingFaceRenderWorker.KEY_PROJECT_ID, projectId).build()
         val request = OneTimeWorkRequestBuilder<HuggingFaceRenderWorker>()
             .setInputData(inputData)
             .addTag(uniqueWorkName)
