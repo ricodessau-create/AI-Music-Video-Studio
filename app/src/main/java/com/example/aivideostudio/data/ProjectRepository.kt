@@ -99,6 +99,7 @@ class ProjectRepository(private val database: AppDatabase) {
                 endTimeSeconds = scene.endTimeSeconds,
                 prompt = scene.prompt,
                 backgroundImagePath = null,
+                referenceImagePath = null,
                 cameraMovement = scene.cameraMovement,
                 transitionType = scene.transitionType,
                 effectsJson = scene.effects.joinToString(","),
