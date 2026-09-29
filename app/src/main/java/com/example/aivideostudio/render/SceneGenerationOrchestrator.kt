@@ -53,11 +53,16 @@ class SceneGenerationOrchestrator(
 
         val rawWorkflowJson = workflowRepository.loadWorkflowRawJson(context, workflow)
         if (rawWorkflowJson.isBlank()) {
-            return SceneGenerationResult.Failure("KI-Generierung fehlgeschlagen.")
+            return SceneGenerationResult.Failure("KI-Generierung fehlgeschlagen: Workflow-Datei leer oder nicht gefunden.")
+        }
+
+        if (characterReferenceImagePath != null && !workflow.supportsReferenceImage) {
+            onStatusUpdate("Referenzbild vorhanden, aber Workflow unterstützt keine Referenzbilder – wird ignoriert")
         }
 
         val referenceImageBase64 = if (workflow.supportsReferenceImage && characterReferenceImagePath != null) {
             encodeImageToBase64(characterReferenceImagePath)
+                ?: return SceneGenerationResult.Failure("Referenzbild konnte nicht gelesen/kodiert werden: $characterReferenceImagePath")
         } else {
             null
         }
@@ -89,7 +94,7 @@ class SceneGenerationOrchestrator(
         val outputInfo = when (pollResult) {
             is ComfyUiPollResult.Success -> pollResult
             is ComfyUiPollResult.Failure -> return SceneGenerationResult.Failure(pollResult.message)
-            is ComfyUiPollResult.Pending -> return SceneGenerationResult.Failure("KI-Generierung fehlgeschlagen.")
+            is ComfyUiPollResult.Pending -> return SceneGenerationResult.Failure("KI-Generierung fehlgeschlagen: Zeitüberschreitung beim Warten auf ComfyUI.")
         }
 
         onStatusUpdate("Ausgabedatei wird heruntergeladen")
