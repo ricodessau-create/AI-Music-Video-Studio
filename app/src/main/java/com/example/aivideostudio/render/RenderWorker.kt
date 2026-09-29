@@ -14,7 +14,6 @@ import com.example.aivideostudio.data.GenerationStatus
 import com.example.aivideostudio.data.ProjectRepository
 import com.example.aivideostudio.data.RenderMode
 import com.example.aivideostudio.data.RenderPresets
-import com.example.aivideostudio.data.SceneEntity
 import com.example.aivideostudio.storyboard.GeneratedScene
 import com.example.aivideostudio.storyboard.VisualPromptAnalyzer
 import com.example.aivideostudio.util.RenderErrorLogger
@@ -30,7 +29,7 @@ class RenderWorker(context: Context, parameters: WorkerParameters) : CoroutineWo
         try {
             setForeground(RenderNotifications.buildForegroundInfo(applicationContext, "Rendern wird vorbereitet", 0))
         } catch (exception: Exception) {
-            // Falls der Vordergrunddienst nicht gestartet werden kann, läuft der Job dennoch als normaler Hintergrund-Worker weiter
+            // Läuft ohne Vordergrunddienst weiter, falls das nicht gestartet werden kann
         }
 
         val database = AppDatabase.getInstance(applicationContext)
@@ -69,7 +68,7 @@ class RenderWorker(context: Context, parameters: WorkerParameters) : CoroutineWo
 
                 val workflowRepository = WorkflowRepository()
                 val storedWorkflow = workflowRepository.listWorkflows(applicationContext).firstOrNull { it.id == workflowId }
-                    ?: return Result.failure(workDataOf(KEY_ERROR_MESSAGE to "KI-Generierung fehlgeschlagen."))
+                    ?: return Result.failure(workDataOf(KEY_ERROR_MESSAGE to "KI-Generierung fehlgeschlagen: Workflow nicht gefunden."))
 
                 val orchestrator = SceneGenerationOrchestrator(applicationContext, comfyUiBaseUrl)
                 val isAvailable = orchestrator.checkConnection()
@@ -78,6 +77,8 @@ class RenderWorker(context: Context, parameters: WorkerParameters) : CoroutineWo
                 }
 
                 val sortedScenes = sceneEntities.sortedBy { it.orderIndex }
+                val failedSceneLabels = ArrayList<String>()
+
                 for ((index, scene) in sortedScenes.withIndex()) {
                     val progressPercent = (index * 100) / sortedScenes.size
                     val statusLabel = "Szene ${index + 1} von ${sortedScenes.size}: ${scene.label}"
@@ -103,13 +104,15 @@ class RenderWorker(context: Context, parameters: WorkerParameters) : CoroutineWo
 
                     repository.markSceneGenerating(scene)
 
+                    val referenceImagePath = scene.referenceImagePath ?: project.characterReferenceImagePath
+
                     val result = orchestrator.generateScene(
                         scene = scene,
                         workflow = storedWorkflow,
                         negativePrompt = project.negativePrompt,
                         width = project.resolutionWidth,
                         height = project.resolutionHeight,
-                        characterReferenceImagePath = project.characterReferenceImagePath
+                        characterReferenceImagePath = referenceImagePath
                     ) { statusText ->
                         val combinedLabel = "Szene ${index + 1} von ${sortedScenes.size}: $statusText"
                         setProgressAsync(
@@ -128,8 +131,17 @@ class RenderWorker(context: Context, parameters: WorkerParameters) : CoroutineWo
                         }
                         is SceneGenerationResult.Failure -> {
                             repository.markSceneFailed(scene, result.message)
+                            failedSceneLabels.add("${scene.label} (${result.message})")
                         }
                     }
+                }
+
+                if (failedSceneLabels.isNotEmpty()) {
+                    return Result.failure(
+                        workDataOf(
+                            KEY_ERROR_MESSAGE to "KI-Generierung für ${failedSceneLabels.size} von ${sortedScenes.size} Szenen fehlgeschlagen: ${failedSceneLabels.joinToString("; ")}"
+                        )
+                    )
                 }
 
                 sceneEntities = repository.getScenes(projectId)
@@ -195,7 +207,7 @@ class RenderWorker(context: Context, parameters: WorkerParameters) : CoroutineWo
                         }
                     }
                     is RenderProgress.Failed -> {
-                        failureMessage = progress.message
+                        failureMessage = progress.message.ifBlank { "Rendern wurde abgebrochen (unbekannter Fehler)." }
                         if (progress.throwable != null) {
                             RenderErrorLogger.logRenderFailure(applicationContext, progress.throwable, "VideoRenderPipeline")
                         }
@@ -213,9 +225,11 @@ class RenderWorker(context: Context, parameters: WorkerParameters) : CoroutineWo
             } else {
                 Result.failure(workDataOf(KEY_ERROR_MESSAGE to "Rendern wurde abgebrochen."))
             }
-        } catch (exception: Exception) {
-            RenderErrorLogger.logRenderFailure(applicationContext, exception, "RenderWorker.doWork")
-            Result.failure(workDataOf(KEY_ERROR_MESSAGE to (exception.message ?: "Audio konnte nicht analysiert werden.")))
+        } catch (throwable: Throwable) {
+            RenderErrorLogger.logRenderFailure(applicationContext, throwable, "RenderWorker.doWork")
+            val message = throwable.message?.ifBlank { null }
+                ?: "Audio konnte nicht analysiert werden (${throwable.javaClass.simpleName})."
+            Result.failure(workDataOf(KEY_ERROR_MESSAGE to message))
         }
     }
 
