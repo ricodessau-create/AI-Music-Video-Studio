@@ -2,6 +2,8 @@ package com.example.aivideostudio.huggingface
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -26,16 +28,13 @@ class HuggingFaceClient(
         targetFile: File
     ): HuggingFaceVideoResult = withContext(Dispatchers.IO) {
         try {
-            val escapedPrompt = escapeJson(parameters.prompt)
-            val payload = """
-                {
-                  "inputs": "$escapedPrompt",
-                  "parameters": {
-                    "num_frames": ${parameters.numFrames},
-                    "negative_prompt": "${escapeJson(parameters.negativePrompt)}"
-                  }
-                }
-            """.trimIndent()
+            val payload = buildJsonObject {
+                put("inputs", parameters.prompt)
+                put("parameters", buildJsonObject {
+                    put("num_frames", parameters.numFrames)
+                    put("negative_prompt", parameters.negativePrompt)
+                })
+            }.toString()
 
             val requestBody = payload.toRequestBody("application/json".toMediaType())
             val request = Request.Builder()
@@ -99,9 +98,5 @@ class HuggingFaceClient(
             kotlinx.coroutines.delay(waitMillisOnLoading)
         }
         return HuggingFaceVideoResult.Failure("Hugging-Face-Modell war nach mehreren Versuchen weiterhin am Laden. Bitte später erneut versuchen.")
-    }
-
-    private fun escapeJson(text: String): String {
-        return text.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", " ")
     }
 }
