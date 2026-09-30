@@ -3,6 +3,7 @@ package com.example.aivideostudio.comfyui
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -25,6 +26,35 @@ class ComfyUiClient(private val config: ComfyUiConnectionConfig) {
             httpClient.newCall(request).execute().use { response -> response.isSuccessful }
         } catch (exception: Exception) {
             false
+        }
+    }
+
+    suspend fun uploadImage(fileName: String, imageBytes: ByteArray): ComfyUiUploadResult = withContext(Dispatchers.IO) {
+        try {
+            val url = buildUrl("/upload/image")
+            val mimeType = if (fileName.endsWith(".png", ignoreCase = true)) "image/png" else "image/jpeg"
+            val body = MultipartBody.Builder()
+                .setType(MultipartBody.FORM)
+                .addFormDataPart("image", fileName, imageBytes.toRequestBody(mimeType.toMediaType()))
+                .addFormDataPart("type", "input")
+                .addFormDataPart("overwrite", "true")
+                .build()
+            val request = Request.Builder().url(url).post(body).build()
+            httpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    return@withContext ComfyUiUploadResult.Failure("Bild-Upload zu ComfyUI fehlgeschlagen (${response.code}).")
+                }
+                val text = response.body?.string().orEmpty()
+                val name = extractStringField(text, "name")
+                val subfolder = extractStringField(text, "subfolder")
+                if (name.isBlank()) {
+                    ComfyUiUploadResult.Failure("Bild-Upload zu ComfyUI fehlgeschlagen: Keine Dateibezeichnung erhalten.")
+                } else {
+                    ComfyUiUploadResult.Success(if (subfolder.isBlank()) name else "$subfolder/$name")
+                }
+            }
+        } catch (exception: Exception) {
+            ComfyUiUploadResult.Failure("Bild-Upload zu ComfyUI fehlgeschlagen: Server nicht erreichbar.")
         }
     }
 
