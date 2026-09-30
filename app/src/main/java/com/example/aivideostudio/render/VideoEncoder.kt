@@ -3,12 +3,10 @@ package com.example.aivideostudio.render
 import android.graphics.Bitmap
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
+import android.media.MediaCodecList
 import android.media.MediaFormat
 import android.media.MediaMuxer
-import android.view.Surface
 import java.io.File
-import java.nio.ByteBuffer
-import kotlin.math.max
 import kotlin.math.min
 
 class VideoEncoder(
@@ -25,7 +23,7 @@ class VideoEncoder(
     private var muxerStarted = false
     private var frameCount = 0L
     private var writtenSampleCount = 0L
-    private var presentationTimeUs = 0L
+    private var lastPresentationTimeUs = -1L
     private var started = false
 
     private val bufferInfo = MediaCodec.BufferInfo()
@@ -111,10 +109,13 @@ class VideoEncoder(
         started = true
         frameCount = 0L
         writtenSampleCount = 0L
-        presentationTimeUs = 0L
+        lastPresentationTimeUs = -1L
     }
 
-    fun encodeFrame(bitmap: Bitmap) {
+    fun encodeFrame(
+        bitmap: Bitmap,
+        presentationTimeUs: Long
+    ) {
         check(started) {
             "VideoEncoder wurde noch nicht gestartet."
         }
@@ -131,50 +132,56 @@ class VideoEncoder(
             "Bitmap-Höhe ${bitmap.height} entspricht nicht der Encoder-Höhe $height."
         }
 
+        require(presentationTimeUs >= 0L) {
+            "Ungültiger Presentation Timestamp: $presentationTimeUs"
+        }
+
+        require(presentationTimeUs > lastPresentationTimeUs) {
+            "Presentation Timestamp muss monoton steigen. " +
+                "Vorher=$lastPresentationTimeUs, aktuell=$presentationTimeUs"
+        }
+
         val codec = encoder
             ?: error("Encoder ist nicht verfügbar.")
 
-        val timeoutUs = 100_000L
+        val inputIndex = waitForInputBuffer(codec)
 
-        val inputIndex = codec.dequeueInputBuffer(timeoutUs)
-
-        if (inputIndex >= 0) {
-            val image = codec.getInputImage(inputIndex)
-
-            if (image == null) {
-                throw IllegalStateException(
-                    "MediaCodec.getInputImage() hat ein null Image geliefert."
-                )
-            }
-
-            try {
-                val planes = image.planes
-
-                require(planes.size >= 3) {
-                    "Der Encoder stellt weniger als drei YUV-Planes bereit."
-                }
-
-                fillImageFromBitmap(
-                    bitmap = bitmap,
-                    image = image
-                )
-            } finally {
-                image.close()
-            }
-
-            val pts = presentationTimeUs
-
-            codec.queueInputBuffer(
-                inputIndex,
-                0,
-                0,
-                pts,
-                0
-            )
-
-            presentationTimeUs += 1_000_000L / frameRate
-            frameCount++
+        if (inputIndex < 0) {
+            drainEncoder(endOfStream = false)
+            return
         }
+
+        val image = codec.getInputImage(inputIndex)
+
+        if (image == null) {
+            throw IllegalStateException(
+                "MediaCodec.getInputImage() hat ein null Image geliefert."
+            )
+        }
+
+        try {
+            require(image.planes.size >= 3) {
+                "Der Encoder stellt weniger als drei YUV-Planes bereit."
+            }
+
+            fillImageFromBitmap(
+                bitmap = bitmap,
+                image = image
+            )
+        } finally {
+            image.close()
+        }
+
+        codec.queueInputBuffer(
+            inputIndex,
+            0,
+            0,
+            presentationTimeUs,
+            0
+        )
+
+        lastPresentationTimeUs = presentationTimeUs
+        frameCount++
 
         drainEncoder(endOfStream = false)
     }
@@ -185,20 +192,31 @@ class VideoEncoder(
         }
 
         val codec = encoder
-            ?: throw IllegalStateException("Encoder ist nicht verfügbar.")
+            ?: throw IllegalStateException(
+                "Encoder ist nicht verfügbar."
+            )
 
         try {
             var eosQueued = false
 
             while (!eosQueued) {
-                val inputIndex = codec.dequeueInputBuffer(100_000L)
+                val inputIndex =
+                    codec.dequeueInputBuffer(100_000L)
 
                 if (inputIndex >= 0) {
+                    val eosTimestamp =
+                        if (lastPresentationTimeUs >= 0L) {
+                            lastPresentationTimeUs +
+                                1_000_000L / frameRate
+                        } else {
+                            0L
+                        }
+
                     codec.queueInputBuffer(
                         inputIndex,
                         0,
                         0,
-                        presentationTimeUs,
+                        eosTimestamp,
                         MediaCodec.BUFFER_FLAG_END_OF_STREAM
                     )
 
@@ -211,24 +229,31 @@ class VideoEncoder(
             var eosReached = false
 
             while (!eosReached) {
-                eosReached = drainEncoder(endOfStream = true)
+                eosReached =
+                    drainEncoder(endOfStream = true)
             }
 
             if (!muxerStarted) {
                 throw IllegalStateException(
-                    "Der MP4-Muxer wurde nie gestartet. Es wurde kein gültiger Video-Track erzeugt."
+                    "Der MP4-Muxer wurde nie gestartet. " +
+                        "Es wurde kein gültiger Video-Track erzeugt."
                 )
             }
 
             if (writtenSampleCount <= 0L) {
                 throw IllegalStateException(
-                    "Der Encoder hat keine Videoframes in die MP4-Datei geschrieben."
+                    "Der Encoder hat keine Videoframes " +
+                        "in die MP4-Datei geschrieben."
                 )
             }
 
-            if (!outputFile.exists() || outputFile.length() <= 1024L) {
+            if (
+                !outputFile.exists() ||
+                outputFile.length() <= 1024L
+            ) {
                 throw IllegalStateException(
-                    "Die erzeugte MP4-Datei ist ungültig oder leer: ${outputFile.absolutePath}"
+                    "Die erzeugte MP4-Datei ist ungültig oder leer: " +
+                        outputFile.absolutePath
                 )
             }
         } finally {
@@ -236,41 +261,73 @@ class VideoEncoder(
         }
     }
 
-    private fun drainEncoder(endOfStream: Boolean): Boolean {
-        val codec = encoder ?: return false
+    private fun waitForInputBuffer(
+        codec: MediaCodec
+    ): Int {
+        repeat(10) {
+            val index =
+                codec.dequeueInputBuffer(100_000L)
+
+            if (index >= 0) {
+                return index
+            }
+
+            drainEncoder(endOfStream = false)
+        }
+
+        throw IllegalStateException(
+            "Kein freier MediaCodec-Input-Buffer verfügbar."
+        )
+    }
+
+    private fun drainEncoder(
+        endOfStream: Boolean
+    ): Boolean {
+        val codec = encoder
+            ?: return false
 
         var eosReached = false
 
         while (true) {
-            val outputIndex = codec.dequeueOutputBuffer(
-                bufferInfo,
-                if (endOfStream) 100_000L else 0L
-            )
+            val outputIndex =
+                codec.dequeueOutputBuffer(
+                    bufferInfo,
+                    if (endOfStream) {
+                        100_000L
+                    } else {
+                        0L
+                    }
+                )
 
             when {
-                outputIndex == MediaCodec.INFO_TRY_AGAIN_LATER -> {
-                    if (!endOfStream) {
-                        return eosReached
-                    }
-
+                outputIndex ==
+                    MediaCodec.INFO_TRY_AGAIN_LATER -> {
                     return eosReached
                 }
 
-                outputIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
+                outputIndex ==
+                    MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
+
                     if (muxerStarted) {
                         throw IllegalStateException(
-                            "Die Encoder-Ausgabeformatänderung trat mehrfach auf."
+                            "Das Encoder-Ausgabeformat " +
+                                "wurde mehrfach geändert."
                         )
                     }
 
-                    val outputFormat = codec.outputFormat
+                    val outputFormat =
+                        codec.outputFormat
 
-                    val currentMuxer = muxer
-                        ?: throw IllegalStateException(
-                            "Muxer ist nicht verfügbar."
+                    val currentMuxer =
+                        muxer
+                            ?: throw IllegalStateException(
+                                "Muxer ist nicht verfügbar."
+                            )
+
+                    trackIndex =
+                        currentMuxer.addTrack(
+                            outputFormat
                         )
-
-                    trackIndex = currentMuxer.addTrack(outputFormat)
 
                     currentMuxer.start()
 
@@ -278,17 +335,31 @@ class VideoEncoder(
                 }
 
                 outputIndex >= 0 -> {
-                    val encodedData = codec.getOutputBuffer(outputIndex)
+                    val encodedData =
+                        codec.getOutputBuffer(
+                            outputIndex
+                        )
 
                     if (encodedData == null) {
-                        codec.releaseOutputBuffer(outputIndex, false)
+                        codec.releaseOutputBuffer(
+                            outputIndex,
+                            false
+                        )
                         continue
                     }
 
-                    if (bufferInfo.size > 0 && muxerStarted) {
-                        encodedData.position(bufferInfo.offset)
+                    if (
+                        bufferInfo.size > 0 &&
+                        muxerStarted &&
+                        trackIndex >= 0
+                    ) {
+                        encodedData.position(
+                            bufferInfo.offset
+                        )
+
                         encodedData.limit(
-                            bufferInfo.offset + bufferInfo.size
+                            bufferInfo.offset +
+                                bufferInfo.size
                         )
 
                         muxer?.writeSampleData(
@@ -301,7 +372,10 @@ class VideoEncoder(
                     }
 
                     val isEndOfStream =
-                        (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0
+                        (
+                            bufferInfo.flags and
+                                MediaCodec.BUFFER_FLAG_END_OF_STREAM
+                            ) != 0
 
                     codec.releaseOutputBuffer(
                         outputIndex,
@@ -327,15 +401,15 @@ class VideoEncoder(
     ) {
         val planes = image.planes
 
-        if (planes.size < 3) {
-            throw IllegalStateException(
-                "YUV-Image besitzt nicht genügend Planes."
-            )
+        require(planes.size >= 3) {
+            "YUV-Image besitzt nicht genügend Planes."
         }
 
-        val pixelBuffer = IntArray(
-            bitmap.width * bitmap.height
-        )
+        val pixelBuffer =
+            IntArray(
+                bitmap.width *
+                    bitmap.height
+            )
 
         bitmap.getPixels(
             pixelBuffer,
@@ -381,58 +455,78 @@ class VideoEncoder(
         val rowStride = plane.rowStride
         val pixelStride = plane.pixelStride
 
-        if (rowStride <= 0 || pixelStride <= 0) {
-            throw IllegalStateException(
-                "Ungültige Y-Plane-Strides: rowStride=$rowStride pixelStride=$pixelStride"
-            )
+        require(rowStride > 0) {
+            "Ungültiger Y-Row-Stride: $rowStride"
         }
 
-        val requiredRows = height
-
-        if (buffer.remaining() <= 0) {
-            throw IllegalStateException(
-                "Y-Plane besitzt keinen beschreibbaren Speicher."
-            )
+        require(pixelStride > 0) {
+            "Ungültiger Y-Pixel-Stride: $pixelStride"
         }
 
-        val basePosition = buffer.position()
+        require(buffer.remaining() > 0) {
+            "Y-Plane besitzt keinen Speicher."
+        }
 
-        try {
-            for (y in 0 until height) {
-                val rowStart = basePosition + y * rowStride
+        val basePosition =
+            buffer.position()
 
-                for (x in 0 until width) {
-                    val pixel = pixels[y * width + x]
+        val bufferLimit =
+            buffer.limit()
 
-                    val r = (pixel shr 16) and 0xFF
-                    val g = (pixel shr 8) and 0xFF
-                    val b = pixel and 0xFF
+        for (y in 0 until height) {
+            val rowStart =
+                basePosition +
+                    y * rowStride
 
-                    val yValue =
-                        ((66 * r + 129 * g + 25 * b + 128) shr 8) + 16
+            for (x in 0 until width) {
+                val pixel =
+                    pixels[
+                        y * width + x
+                    ]
 
-                    val position =
-                        rowStart + x * pixelStride
+                val r =
+                    (pixel shr 16) and 0xFF
 
-                    if (position < basePosition ||
-                        position >= basePosition + buffer.capacity()
-                    ) {
-                        throw IllegalStateException(
-                            "Y-Plane überschreitet die verfügbare Buffer-Kapazität."
-                        )
-                    }
+                val g =
+                    (pixel shr 8) and 0xFF
 
-                    buffer.put(
-                        position,
-                        yValue.coerceIn(0, 255).toByte()
+                val b =
+                    pixel and 0xFF
+
+                val yValue =
+                    (
+                        66 * r +
+                            129 * g +
+                            25 * b +
+                            128
+                        ) shr 8
+
+                val position =
+                    rowStart +
+                        x * pixelStride
+
+                if (
+                    position < basePosition ||
+                    position >= bufferLimit
+                ) {
+                    throw IllegalStateException(
+                        "Y-Plane überschreitet " +
+                            "den verfügbaren Buffer."
                     )
                 }
+
+                buffer.put(
+                    position,
+                    (
+                        yValue + 16
+                    )
+                        .coerceIn(
+                            0,
+                            255
+                        )
+                        .toByte()
+                )
             }
-        } catch (e: IndexOutOfBoundsException) {
-            throw IllegalStateException(
-                "Fehler beim Schreiben der Y-Plane.",
-                e
-            )
         }
     }
 
@@ -447,89 +541,124 @@ class VideoEncoder(
         val rowStride = plane.rowStride
         val pixelStride = plane.pixelStride
 
-        if (rowStride <= 0 || pixelStride <= 0) {
-            throw IllegalStateException(
-                "Ungültige Chroma-Plane-Strides: rowStride=$rowStride pixelStride=$pixelStride"
-            )
+        require(rowStride > 0) {
+            "Ungültiger Chroma-Row-Stride: $rowStride"
         }
 
-        val chromaWidth = (width + 1) / 2
-        val chromaHeight = (height + 1) / 2
-
-        val basePosition = buffer.position()
-
-        if (buffer.remaining() <= 0) {
-            throw IllegalStateException(
-                "Chroma-Plane besitzt keinen beschreibbaren Speicher."
-            )
+        require(pixelStride > 0) {
+            "Ungültiger Chroma-Pixel-Stride: $pixelStride"
         }
 
-        try {
-            for (y in 0 until chromaHeight) {
-                val sourceY = min(
+        require(buffer.remaining() > 0) {
+            "Chroma-Plane besitzt keinen Speicher."
+        }
+
+        val chromaWidth =
+            (width + 1) / 2
+
+        val chromaHeight =
+            (height + 1) / 2
+
+        val basePosition =
+            buffer.position()
+
+        val bufferLimit =
+            buffer.limit()
+
+        for (y in 0 until chromaHeight) {
+            val sourceY =
+                min(
                     y * 2,
                     height - 1
                 )
 
-                val rowStart =
-                    basePosition + y * rowStride
+            val rowStart =
+                basePosition +
+                    y * rowStride
 
-                for (x in 0 until chromaWidth) {
-                    val sourceX = min(
+            for (x in 0 until chromaWidth) {
+                val sourceX =
+                    min(
                         x * 2,
                         width - 1
                     )
 
-                    val pixel =
-                        pixels[sourceY * width + sourceX]
+                val pixel =
+                    pixels[
+                        sourceY * width +
+                            sourceX
+                    ]
 
-                    val r = (pixel shr 16) and 0xFF
-                    val g = (pixel shr 8) and 0xFF
-                    val b = pixel and 0xFF
+                val r =
+                    (pixel shr 16) and 0xFF
 
-                    val value = if (uPlane) {
-                        ((-38 * r - 74 * g + 112 * b + 128) shr 8) + 128
+                val g =
+                    (pixel shr 8) and 0xFF
+
+                val b =
+                    pixel and 0xFF
+
+                val value =
+                    if (uPlane) {
+                        (
+                            -38 * r -
+                                74 * g +
+                                112 * b +
+                                128
+                            ) shr 8
                     } else {
-                        ((112 * r - 94 * g - 18 * b + 128) shr 8) + 128
+                        (
+                            112 * r -
+                                94 * g -
+                                18 * b +
+                                128
+                            ) shr 8
                     }
 
-                    val position =
-                        rowStart + x * pixelStride
+                val position =
+                    rowStart +
+                        x * pixelStride
 
-                    if (position < basePosition ||
-                        position >= basePosition + buffer.capacity()
-                    ) {
-                        throw IllegalStateException(
-                            "Chroma-Plane überschreitet die verfügbare Buffer-Kapazität."
-                        )
-                    }
-
-                    buffer.put(
-                        position,
-                        value.coerceIn(0, 255).toByte()
+                if (
+                    position < basePosition ||
+                    position >= bufferLimit
+                ) {
+                    throw IllegalStateException(
+                        "Chroma-Plane überschreitet " +
+                            "den verfügbaren Buffer."
                     )
                 }
+
+                buffer.put(
+                    position,
+                    (
+                        value + 128
+                    )
+                        .coerceIn(
+                            0,
+                            255
+                        )
+                        .toByte()
+                )
             }
-        } catch (e: IndexOutOfBoundsException) {
-            throw IllegalStateException(
-                "Fehler beim Schreiben der Chroma-Plane.",
-                e
-            )
         }
     }
 
     private fun findEncoderCodec(): String {
-        val preferredNames = listOf(
-            "c2.android.avc.encoder",
-            "OMX.google.h264.encoder"
-        )
+        val preferredNames =
+            listOf(
+                "c2.android.avc.encoder",
+                "OMX.google.h264.encoder"
+            )
 
         for (name in preferredNames) {
             try {
-                val codecInfo =
-                    MediaCodec.createByCodecName(name)
+                val codec =
+                    MediaCodec.createByCodecName(
+                        name
+                    )
 
-                codecInfo.release()
+                codec.release()
 
                 return name
             } catch (_: Exception) {
@@ -537,26 +666,34 @@ class VideoEncoder(
         }
 
         val codecList =
-            MediaCodecList(MediaCodecList.ALL_CODECS)
+            MediaCodecList(
+                MediaCodecList.ALL_CODECS
+            )
 
-        for (codecInfo in codecList.codecInfos) {
-            if (codecInfo.isEncoder) {
-                val supportsAvc =
-                    codecInfo.supportedTypes.any {
-                        it.equals(
-                            MediaFormat.MIMETYPE_VIDEO_AVC,
-                            ignoreCase = true
-                        )
-                    }
+        for (
+            codecInfo in
+            codecList.codecInfos
+        ) {
+            if (!codecInfo.isEncoder) {
+                continue
+            }
 
-                if (supportsAvc) {
-                    return codecInfo.name
+            val supportsAvc =
+                codecInfo.supportedTypes.any { type ->
+                    type.equals(
+                        MediaFormat.MIMETYPE_VIDEO_AVC,
+                        ignoreCase = true
+                    )
                 }
+
+            if (supportsAvc) {
+                return codecInfo.name
             }
         }
 
         throw IllegalStateException(
-            "Auf diesem Gerät wurde kein H.264/AVC-Encoder gefunden."
+            "Auf diesem Gerät wurde kein " +
+                "H.264/AVC-Encoder gefunden."
         )
     }
 
