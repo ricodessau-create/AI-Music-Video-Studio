@@ -15,3 +15,8 @@ sealed class ComfyUiDownloadResult {
     data class Success(val localFilePath: String) : ComfyUiDownloadResult()
     data class Failure(val message: String) : ComfyUiDownloadResult()
 }
+
+sealed class ComfyUiUploadResult {
+    data class Success(val imageName: String) : ComfyUiUploadResult()
+    data class Failure(val message: String) : ComfyUiUploadResult()
+}
