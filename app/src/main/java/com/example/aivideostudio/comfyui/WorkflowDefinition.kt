@@ -31,4 +31,5 @@ object WorkflowPlaceholders {
     const val FRAMES = "{{FRAMES}}"
     const val FPS = "{{FPS}}"
     const val REFERENCE_IMAGE = "{{REFERENCE_IMAGE}}"
+    const val REFERENCE_IMAGE_NAME = "{{REFERENCE_IMAGE_NAME}}"
 }
