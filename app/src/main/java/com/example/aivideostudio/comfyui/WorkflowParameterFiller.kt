@@ -10,7 +10,8 @@ data class WorkflowParameters(
     val cfg: Float,
     val frames: Int,
     val fps: Int,
-    val referenceImageBase64: String?
+    val referenceImageBase64: String?,
+    val referenceImageName: String? = null
 )
 
 class WorkflowParameterFiller {
@@ -30,6 +31,10 @@ class WorkflowParameterFiller {
 
         if (parameters.referenceImageBase64 != null) {
             result = result.replace(WorkflowPlaceholders.REFERENCE_IMAGE, escapeJson(parameters.referenceImageBase64))
+        }
+
+        if (parameters.referenceImageName != null) {
+            result = result.replace(WorkflowPlaceholders.REFERENCE_IMAGE_NAME, escapeJson(parameters.referenceImageName))
         }
 
         return result
