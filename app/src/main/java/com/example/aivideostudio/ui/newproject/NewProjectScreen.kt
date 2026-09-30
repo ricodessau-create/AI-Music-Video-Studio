@@ -1,13 +1,17 @@
 package com.example.aivideostudio.ui.newproject
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -17,6 +21,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
@@ -28,8 +33,11 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -39,6 +47,7 @@ import com.example.aivideostudio.comfyui.WorkflowRepository
 import com.example.aivideostudio.data.RenderMode
 import com.example.aivideostudio.util.FileCopyUtils
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 private fun genreDisplayName(genre: SongGenre?): String {
@@ -53,9 +62,21 @@ private fun genreDisplayName(genre: SongGenre?): String {
     }
 }
 
+private fun decodePreview(path: String): Bitmap? {
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeFile(path, bounds)
+    var sampleSize = 1
+    while (maxOf(bounds.outWidth, bounds.outHeight) / sampleSize > 1024) {
+        sampleSize *= 2
+    }
+    val options = BitmapFactory.Options().apply { inSampleSize = sampleSize }
+    return BitmapFactory.decodeFile(path, options)
+}
+
 @Composable
 fun NewProjectScreen(onProjectCreated: (String) -> Unit, viewModel: NewProjectViewModel = viewModel()) {
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
     val uiState by viewModel.uiState.collectAsState()
 
     var projectName by remember { mutableStateOf("Mein Musikvideo") }
@@ -63,7 +84,8 @@ fun NewProjectScreen(onProjectCreated: (String) -> Unit, viewModel: NewProjectVi
     var globalVisualStyle by remember { mutableStateOf("dark fantasy, cinematic, dramatic lighting, high detail") }
     var negativePrompt by remember { mutableStateOf("low quality, blurry, distorted, deformed, bad anatomy, duplicate, text, watermark, logo") }
     var selectedSongUri by remember { mutableStateOf<Uri?>(null) }
-    var selectedReferenceUri by remember { mutableStateOf<Uri?>(null) }
+    var referenceImagePath by remember { mutableStateOf<String?>(null) }
+    var referencePreview by remember { mutableStateOf<Bitmap?>(null) }
     var resolutionExpanded by remember { mutableStateOf(false) }
     var selectedResolution by remember { mutableStateOf("1080p") }
     var aspectExpanded by remember { mutableStateOf(false) }
@@ -91,7 +113,19 @@ fun NewProjectScreen(onProjectCreated: (String) -> Unit, viewModel: NewProjectVi
     }
 
     val referencePickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        selectedReferenceUri = uri
+        if (uri != null) {
+            coroutineScope.launch {
+                val result = withContext(Dispatchers.IO) {
+                    val path = FileCopyUtils.copyImageNormalized(context, uri, "reference_image")
+                    val preview = path?.let { decodePreview(it) }
+                    Pair(path, preview)
+                }
+                if (result.first != null) {
+                    referenceImagePath = result.first
+                    referencePreview = result.second
+                }
+            }
+        }
     }
 
     LaunchedEffect(uiState) {
@@ -120,6 +154,42 @@ fun NewProjectScreen(onProjectCreated: (String) -> Unit, viewModel: NewProjectVi
             Button(onClick = { songPickerLauncher.launch("audio/*") }, modifier = Modifier.fillMaxWidth()) {
                 Text(if (selectedSongUri == null) "Song auswählen" else "Song ausgewählt")
             }
+
+            val previewBitmap = referencePreview
+            if (previewBitmap != null) {
+                Image(
+                    bitmap = previewBitmap.asImageBitmap(),
+                    contentDescription = "Vorschau Bild der Band oder des Interpreten",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(180.dp)
+                )
+            }
+
+            Button(onClick = { referencePickerLauncher.launch("image/*") }, modifier = Modifier.fillMaxWidth()) {
+                Text(if (referenceImagePath == null) "Bild von Band / Interpret auswählen" else "Bild ändern")
+            }
+
+            if (referenceImagePath != null) {
+                OutlinedButton(
+                    onClick = {
+                        referenceImagePath = null
+                        referencePreview = null
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Bild entfernen")
+                }
+            }
+
+            Text(
+                if (renderMode == RenderMode.COMFYUI) {
+                    "Das Bild wird als Startbild an den ComfyUI-Workflow übergeben. Für echte Bewegungen von Sänger und Band brauchst du einen Bild-zu-Video-Workflow mit dem Platzhalter {{REFERENCE_IMAGE_NAME}}."
+                } else {
+                    "Das Bild wird als Hauptmotiv verwendet und mit Kamerafahrten, Parallax und Beat-Bewegung animiert. Echte Körperbewegungen erzeugt nur der ComfyUI-Modus mit einem Bild-zu-Video-Workflow."
+                }
+            )
 
             ExposedDropdownMenuBox(expanded = genreExpanded, onExpandedChange = { genreExpanded = it }) {
                 OutlinedTextField(
@@ -226,10 +296,6 @@ fun NewProjectScreen(onProjectCreated: (String) -> Unit, viewModel: NewProjectVi
                     minLines = 2
                 )
 
-                Button(onClick = { referencePickerLauncher.launch("image/*") }, modifier = Modifier.fillMaxWidth()) {
-                    Text(if (selectedReferenceUri == null) "Referenzbild wählen (optional)" else "Referenzbild ausgewählt")
-                }
-
                 if (availableWorkflows.isEmpty()) {
                     Text("Kein Workflow importiert. Workflows können nach Erstellung des Projekts in den Projekteinstellungen (Zahnrad-Symbol im Szeneneditor) importiert werden.")
                 } else {
@@ -267,9 +333,6 @@ fun NewProjectScreen(onProjectCreated: (String) -> Unit, viewModel: NewProjectVi
                     val songUri = selectedSongUri
                     if (songUri != null) {
                         val localSongPath = FileCopyUtils.copyUriToInternalStorage(context, songUri, "song_input")
-                        val localReferencePath = selectedReferenceUri?.let {
-                            FileCopyUtils.copyUriToInternalStorage(context, it, "reference_image")
-                        }
                         if (localSongPath != null) {
                             viewModel.createProject(
                                 projectName = projectName,
@@ -281,7 +344,7 @@ fun NewProjectScreen(onProjectCreated: (String) -> Unit, viewModel: NewProjectVi
                                 comfyUiBaseUrl = if (renderMode == RenderMode.COMFYUI) comfyUiBaseUrl else null,
                                 globalVisualStyle = globalVisualStyle,
                                 negativePrompt = negativePrompt,
-                                characterReferenceImagePath = localReferencePath,
+                                characterReferenceImagePath = referenceImagePath,
                                 selectedWorkflowId = selectedWorkflow?.id,
                                 manualGenre = selectedGenre
                             )
