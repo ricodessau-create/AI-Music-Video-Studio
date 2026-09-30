@@ -9,10 +9,12 @@ import com.example.aivideostudio.comfyui.ComfyUiConnectionConfig
 import com.example.aivideostudio.comfyui.ComfyUiDownloadResult
 import com.example.aivideostudio.comfyui.ComfyUiPollResult
 import com.example.aivideostudio.comfyui.ComfyUiSubmitResult
+import com.example.aivideostudio.comfyui.ComfyUiUploadResult
 import com.example.aivideostudio.comfyui.StoredWorkflow
 import com.example.aivideostudio.comfyui.WorkflowMediaType
 import com.example.aivideostudio.comfyui.WorkflowParameterFiller
 import com.example.aivideostudio.comfyui.WorkflowParameters
+import com.example.aivideostudio.comfyui.WorkflowPlaceholders
 import com.example.aivideostudio.comfyui.WorkflowRepository
 import com.example.aivideostudio.data.GeneratedMediaType
 import com.example.aivideostudio.data.SceneEntity
@@ -56,15 +58,37 @@ class SceneGenerationOrchestrator(
             return SceneGenerationResult.Failure("KI-Generierung fehlgeschlagen: Workflow-Datei leer oder nicht gefunden.")
         }
 
-        if (characterReferenceImagePath != null && !workflow.supportsReferenceImage) {
-            onStatusUpdate("Referenzbild vorhanden, aber Workflow unterstützt keine Referenzbilder – wird ignoriert")
+        val usesBase64Placeholder = rawWorkflowJson.contains(WorkflowPlaceholders.REFERENCE_IMAGE)
+        val usesNamePlaceholder = rawWorkflowJson.contains(WorkflowPlaceholders.REFERENCE_IMAGE_NAME)
+        val workflowUsesReference = usesBase64Placeholder || usesNamePlaceholder
+
+        if (workflowUsesReference && characterReferenceImagePath == null) {
+            return SceneGenerationResult.Failure("Dieser Workflow braucht ein Bild der Band oder des Interpreten. Bitte im Projekt oder in der Szene ein Bild auswählen.")
         }
 
-        val referenceImageBase64 = if (workflow.supportsReferenceImage && characterReferenceImagePath != null) {
-            encodeImageToBase64(characterReferenceImagePath)
-                ?: return SceneGenerationResult.Failure("Referenzbild konnte nicht gelesen/kodiert werden: $characterReferenceImagePath")
-        } else {
-            null
+        if (!workflowUsesReference && characterReferenceImagePath != null) {
+            onStatusUpdate("Bild vorhanden, aber der Workflow enthält keinen Bild-Platzhalter – es wird ignoriert")
+        }
+
+        var referenceImageBase64: String? = null
+        var referenceImageName: String? = null
+
+        if (workflowUsesReference && characterReferenceImagePath != null) {
+            if (usesBase64Placeholder) {
+                referenceImageBase64 = encodeImageToBase64(characterReferenceImagePath)
+                    ?: return SceneGenerationResult.Failure("Referenzbild konnte nicht gelesen/kodiert werden: $characterReferenceImagePath")
+            }
+
+            if (usesNamePlaceholder) {
+                onStatusUpdate("Bild wird zu ComfyUI hochgeladen")
+                val payload = readUploadPayload(characterReferenceImagePath)
+                    ?: return SceneGenerationResult.Failure("Referenzbild konnte nicht gelesen werden: $characterReferenceImagePath")
+                val uploadResult = client.uploadImage(payload.first, payload.second)
+                referenceImageName = when (uploadResult) {
+                    is ComfyUiUploadResult.Success -> uploadResult.imageName
+                    is ComfyUiUploadResult.Failure -> return SceneGenerationResult.Failure(uploadResult.message)
+                }
+            }
         }
 
         val parameters = WorkflowParameters(
@@ -77,7 +101,8 @@ class SceneGenerationOrchestrator(
             cfg = 7.0f,
             frames = estimateFrameCount(scene),
             fps = 24,
-            referenceImageBase64 = referenceImageBase64
+            referenceImageBase64 = referenceImageBase64,
+            referenceImageName = referenceImageName
         )
 
         val filledWorkflowJson = parameterFiller.fill(rawWorkflowJson, parameters)
@@ -125,14 +150,48 @@ class SceneGenerationOrchestrator(
         return (durationSeconds * 24.0).toInt().coerceAtLeast(24)
     }
 
-    private fun encodeImageToBase64(path: String): String? {
+    private fun readUploadPayload(path: String): Pair<String, ByteArray>? {
+        return try {
+            val file = File(path)
+            if (!file.exists() || file.length() <= 0L) {
+                return null
+            }
+            val bytes = file.readBytes()
+            val isPng = bytes.size > 4 &&
+                bytes[0] == 0x89.toByte() &&
+                bytes[1] == 0x50.toByte() &&
+                bytes[2] == 0x4E.toByte() &&
+                bytes[3] == 0x47.toByte()
+            val isJpeg = bytes.size > 3 &&
+                bytes[0] == 0xFF.toByte() &&
+                bytes[1] == 0xD8.toByte()
+            val baseName = file.nameWithoutExtension
+            when {
+                isPng -> Pair("band_$baseName.png", bytes)
+                isJpeg -> Pair("band_$baseName.jpg", bytes)
+                else -> {
+                    val pngBytes = encodeImageToPngBytes(path) ?: return null
+                    Pair("band_$baseName.png", pngBytes)
+                }
+            }
+        } catch (exception: Exception) {
+            null
+        }
+    }
+
+    private fun encodeImageToPngBytes(path: String): ByteArray? {
         return try {
             val bitmap = BitmapFactory.decodeFile(path) ?: return null
             val outputStream = java.io.ByteArrayOutputStream()
             bitmap.compress(Bitmap.CompressFormat.PNG, 100, outputStream)
-            Base64.encodeToString(outputStream.toByteArray(), Base64.NO_WRAP)
+            outputStream.toByteArray()
         } catch (exception: Exception) {
             null
         }
+    }
+
+    private fun encodeImageToBase64(path: String): String? {
+        val pngBytes = encodeImageToPngBytes(path) ?: return null
+        return Base64.encodeToString(pngBytes, Base64.NO_WRAP)
     }
 }
