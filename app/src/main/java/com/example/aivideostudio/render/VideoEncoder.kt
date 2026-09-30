@@ -19,17 +19,17 @@ class VideoEncoder(
 
     private var encoder: MediaCodec? = null
     private var muxer: MediaMuxer? = null
+
     private var trackIndex = -1
     private var muxerStarted = false
+    private var started = false
+
     private var frameCount = 0L
     private var writtenSampleCount = 0L
     private var lastPresentationTimeUs = -1L
-    private var started = false
 
-    private val bufferInfo = MediaCodec.BufferInfo()
-
-    private var negotiatedColorFormat =
-        MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible
+    private val bufferInfo =
+        MediaCodec.BufferInfo()
 
     fun start() {
         check(!started) {
@@ -54,11 +54,12 @@ class VideoEncoder(
 
         outputFile.parentFile?.mkdirs()
 
-        val format = MediaFormat.createVideoFormat(
-            MediaFormat.MIMETYPE_VIDEO_AVC,
-            width,
-            height
-        )
+        val format =
+            MediaFormat.createVideoFormat(
+                MediaFormat.MIMETYPE_VIDEO_AVC,
+                width,
+                height
+            )
 
         format.setInteger(
             MediaFormat.KEY_COLOR_FORMAT,
@@ -80,36 +81,53 @@ class VideoEncoder(
             2
         )
 
-        val codecName = findEncoderCodec()
+        val codecName =
+            findEncoderCodec()
 
-        val codec = MediaCodec.createByCodecName(codecName)
-
-        codec.configure(
-            format,
-            null,
-            null,
-            MediaCodec.CONFIGURE_FLAG_ENCODE
-        )
-
-        negotiatedColorFormat =
-            codec.inputFormat.getInteger(
-                MediaFormat.KEY_COLOR_FORMAT,
-                MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible
+        val codec =
+            MediaCodec.createByCodecName(
+                codecName
             )
 
-        encoder = codec
+        try {
+            codec.configure(
+                format,
+                null,
+                null,
+                MediaCodec.CONFIGURE_FLAG_ENCODE
+            )
 
-        muxer = MediaMuxer(
-            outputFile.absolutePath,
-            MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4
-        )
+            encoder = codec
 
-        codec.start()
+            muxer =
+                MediaMuxer(
+                    outputFile.absolutePath,
+                    MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4
+                )
 
-        started = true
-        frameCount = 0L
-        writtenSampleCount = 0L
-        lastPresentationTimeUs = -1L
+            codec.start()
+
+            started = true
+            frameCount = 0L
+            writtenSampleCount = 0L
+            lastPresentationTimeUs = -1L
+        } catch (exception: Exception) {
+            try {
+                codec.release()
+            } catch (_: Exception) {
+            }
+
+            encoder = null
+
+            try {
+                muxer?.release()
+            } catch (_: Exception) {
+            }
+
+            muxer = null
+
+            throw exception
+        }
     }
 
     fun encodeFrame(
@@ -136,28 +154,30 @@ class VideoEncoder(
             "Ungültiger Presentation Timestamp: $presentationTimeUs"
         }
 
-        require(presentationTimeUs > lastPresentationTimeUs) {
+        require(
+            presentationTimeUs > lastPresentationTimeUs
+        ) {
             "Presentation Timestamp muss monoton steigen. " +
-                "Vorher=$lastPresentationTimeUs, aktuell=$presentationTimeUs"
+                "Vorher=$lastPresentationTimeUs, " +
+                "aktuell=$presentationTimeUs"
         }
 
-        val codec = encoder
-            ?: error("Encoder ist nicht verfügbar.")
+        val codec =
+            encoder
+                ?: error(
+                    "Encoder ist nicht verfügbar."
+                )
 
-        val inputIndex = waitForInputBuffer(codec)
+        val inputIndex =
+            waitForInputBuffer(codec)
 
-        if (inputIndex < 0) {
-            drainEncoder(endOfStream = false)
-            return
-        }
-
-        val image = codec.getInputImage(inputIndex)
-
-        if (image == null) {
-            throw IllegalStateException(
-                "MediaCodec.getInputImage() hat ein null Image geliefert."
+        val image =
+            codec.getInputImage(
+                inputIndex
             )
-        }
+                ?: throw IllegalStateException(
+                    "MediaCodec.getInputImage() hat ein null Image geliefert."
+                )
 
         try {
             require(image.planes.size >= 3) {
@@ -180,10 +200,14 @@ class VideoEncoder(
             0
         )
 
-        lastPresentationTimeUs = presentationTimeUs
+        lastPresentationTimeUs =
+            presentationTimeUs
+
         frameCount++
 
-        drainEncoder(endOfStream = false)
+        drainEncoder(
+            endOfStream = false
+        )
     }
 
     fun finish() {
@@ -191,46 +215,22 @@ class VideoEncoder(
             return
         }
 
-        val codec = encoder
-            ?: throw IllegalStateException(
-                "Encoder ist nicht verfügbar."
-            )
+        val codec =
+            encoder
+                ?: throw IllegalStateException(
+                    "Encoder ist nicht verfügbar."
+                )
 
         try {
-            var eosQueued = false
-
-            while (!eosQueued) {
-                val inputIndex =
-                    codec.dequeueInputBuffer(100_000L)
-
-                if (inputIndex >= 0) {
-                    val eosTimestamp =
-                        if (lastPresentationTimeUs >= 0L) {
-                            lastPresentationTimeUs +
-                                1_000_000L / frameRate
-                        } else {
-                            0L
-                        }
-
-                    codec.queueInputBuffer(
-                        inputIndex,
-                        0,
-                        0,
-                        eosTimestamp,
-                        MediaCodec.BUFFER_FLAG_END_OF_STREAM
-                    )
-
-                    eosQueued = true
-                }
-
-                drainEncoder(endOfStream = true)
-            }
+            queueEndOfStream(codec)
 
             var eosReached = false
 
             while (!eosReached) {
                 eosReached =
-                    drainEncoder(endOfStream = true)
+                    drainEncoder(
+                        endOfStream = true
+                    )
             }
 
             if (!muxerStarted) {
@@ -264,15 +264,25 @@ class VideoEncoder(
     private fun waitForInputBuffer(
         codec: MediaCodec
     ): Int {
-        repeat(10) {
-            val index =
-                codec.dequeueInputBuffer(100_000L)
+        val timeoutUs =
+            250_000L
 
-            if (index >= 0) {
-                return index
+        val maxWaitAttempts =
+            40
+
+        repeat(maxWaitAttempts) {
+            val inputIndex =
+                codec.dequeueInputBuffer(
+                    timeoutUs
+                )
+
+            if (inputIndex >= 0) {
+                return inputIndex
             }
 
-            drainEncoder(endOfStream = false)
+            drainEncoder(
+                endOfStream = false
+            )
         }
 
         throw IllegalStateException(
@@ -280,23 +290,77 @@ class VideoEncoder(
         )
     }
 
+    private fun queueEndOfStream(
+        codec: MediaCodec
+    ) {
+        val timeoutUs =
+            250_000L
+
+        val maxAttempts =
+            80
+
+        repeat(maxAttempts) {
+            val inputIndex =
+                codec.dequeueInputBuffer(
+                    timeoutUs
+                )
+
+            if (inputIndex >= 0) {
+                val eosTimestamp =
+                    if (lastPresentationTimeUs >= 0L) {
+                        lastPresentationTimeUs +
+                            (
+                                1_000_000L /
+                                    frameRate.toLong()
+                                )
+                    } else {
+                        0L
+                    }
+
+                codec.queueInputBuffer(
+                    inputIndex,
+                    0,
+                    0,
+                    eosTimestamp,
+                    MediaCodec.BUFFER_FLAG_END_OF_STREAM
+                )
+
+                return
+            }
+
+            drainEncoder(
+                endOfStream = false
+            )
+        }
+
+        throw IllegalStateException(
+            "Der MediaCodec-Input-Buffer für das " +
+                "Ende des Videos wurde nicht verfügbar."
+        )
+    }
+
     private fun drainEncoder(
         endOfStream: Boolean
     ): Boolean {
-        val codec = encoder
-            ?: return false
+        val codec =
+            encoder
+                ?: return false
 
-        var eosReached = false
+        var eosReached =
+            false
+
+        val timeoutUs =
+            if (endOfStream) {
+                250_000L
+            } else {
+                0L
+            }
 
         while (true) {
             val outputIndex =
                 codec.dequeueOutputBuffer(
                     bufferInfo,
-                    if (endOfStream) {
-                        100_000L
-                    } else {
-                        0L
-                    }
+                    timeoutUs
                 )
 
             when {
@@ -310,8 +374,7 @@ class VideoEncoder(
 
                     if (muxerStarted) {
                         throw IllegalStateException(
-                            "Das Encoder-Ausgabeformat " +
-                                "wurde mehrfach geändert."
+                            "Das Encoder-Ausgabeformat wurde mehrfach geändert."
                         )
                     }
 
@@ -340,35 +403,29 @@ class VideoEncoder(
                             outputIndex
                         )
 
-                    if (encodedData == null) {
-                        codec.releaseOutputBuffer(
-                            outputIndex,
-                            false
-                        )
-                        continue
-                    }
+                    if (encodedData != null) {
+                        if (
+                            bufferInfo.size > 0 &&
+                            muxerStarted &&
+                            trackIndex >= 0
+                        ) {
+                            encodedData.position(
+                                bufferInfo.offset
+                            )
 
-                    if (
-                        bufferInfo.size > 0 &&
-                        muxerStarted &&
-                        trackIndex >= 0
-                    ) {
-                        encodedData.position(
-                            bufferInfo.offset
-                        )
+                            encodedData.limit(
+                                bufferInfo.offset +
+                                    bufferInfo.size
+                            )
 
-                        encodedData.limit(
-                            bufferInfo.offset +
-                                bufferInfo.size
-                        )
+                            muxer?.writeSampleData(
+                                trackIndex,
+                                encodedData,
+                                bufferInfo
+                            )
 
-                        muxer?.writeSampleData(
-                            trackIndex,
-                            encodedData,
-                            bufferInfo
-                        )
-
-                        writtenSampleCount++
+                            writtenSampleCount++
+                        }
                     }
 
                     val isEndOfStream =
@@ -399,7 +456,8 @@ class VideoEncoder(
         bitmap: Bitmap,
         image: android.media.Image
     ) {
-        val planes = image.planes
+        val planes =
+            image.planes
 
         require(planes.size >= 3) {
             "YUV-Image besitzt nicht genügend Planes."
@@ -451,9 +509,14 @@ class VideoEncoder(
         height: Int,
         plane: android.media.Image.Plane
     ) {
-        val buffer = plane.buffer
-        val rowStride = plane.rowStride
-        val pixelStride = plane.pixelStride
+        val buffer =
+            plane.buffer
+
+        val rowStride =
+            plane.rowStride
+
+        val pixelStride =
+            plane.pixelStride
 
         require(rowStride > 0) {
             "Ungültiger Y-Row-Stride: $rowStride"
@@ -510,8 +573,7 @@ class VideoEncoder(
                     position >= bufferLimit
                 ) {
                     throw IllegalStateException(
-                        "Y-Plane überschreitet " +
-                            "den verfügbaren Buffer."
+                        "Y-Plane überschreitet den verfügbaren Buffer."
                     )
                 }
 
@@ -537,9 +599,14 @@ class VideoEncoder(
         plane: android.media.Image.Plane,
         uPlane: Boolean
     ) {
-        val buffer = plane.buffer
-        val rowStride = plane.rowStride
-        val pixelStride = plane.pixelStride
+        val buffer =
+            plane.buffer
+
+        val rowStride =
+            plane.rowStride
+
+        val pixelStride =
+            plane.pixelStride
 
         require(rowStride > 0) {
             "Ungültiger Chroma-Row-Stride: $rowStride"
@@ -624,8 +691,7 @@ class VideoEncoder(
                     position >= bufferLimit
                 ) {
                     throw IllegalStateException(
-                        "Chroma-Plane überschreitet " +
-                            "den verfügbaren Buffer."
+                        "Chroma-Plane überschreitet den verfügbaren Buffer."
                     )
                 }
 
@@ -692,8 +758,7 @@ class VideoEncoder(
         }
 
         throw IllegalStateException(
-            "Auf diesem Gerät wurde kein " +
-                "H.264/AVC-Encoder gefunden."
+            "Auf diesem Gerät wurde kein H.264/AVC-Encoder gefunden."
         )
     }
 
@@ -723,6 +788,7 @@ class VideoEncoder(
         }
 
         muxer = null
+
         muxerStarted = false
         trackIndex = -1
         started = false
