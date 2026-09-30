@@ -275,7 +275,6 @@ class StoryboardGenerator {
             average /
                 maxEnergy
             ).coerceIn(0f, 1f)
-        )
     }
 
     private fun buildScenePrompt(
@@ -329,19 +328,27 @@ class StoryboardGenerator {
             )
 
             if (visualParameters.hasSnowParticles) {
-                append("Schnee darf als atmosphärisches Element verwendet werden. ")
+                append(
+                    "Schnee darf als atmosphärisches Element verwendet werden. "
+                )
             }
 
             if (visualParameters.hasFireParticles) {
-                append("Feuer und Funken dürfen als atmosphärische Elemente verwendet werden. ")
+                append(
+                    "Feuer und Funken dürfen als atmosphärische Elemente verwendet werden. "
+                )
             }
 
             if (visualParameters.hasRain) {
-                append("Regen darf als atmosphärisches Element verwendet werden. ")
+                append(
+                    "Regen darf als atmosphärisches Element verwendet werden. "
+                )
             }
 
             if (visualParameters.hasSmoke) {
-                append("Rauch darf als atmosphärisches Element verwendet werden. ")
+                append(
+                    "Rauch darf als atmosphärisches Element verwendet werden. "
+                )
             }
 
             append(
