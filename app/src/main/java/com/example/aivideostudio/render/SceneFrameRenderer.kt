@@ -8,6 +8,8 @@ import android.graphics.Paint
 import android.graphics.RectF
 import com.example.aivideostudio.storyboard.GeneratedScene
 import com.example.aivideostudio.storyboard.VisualParameters
+import kotlin.math.cos
+import kotlin.math.sin
 
 class SceneFrameRenderer(
     private val outputWidth: Int,
@@ -17,6 +19,8 @@ class SceneFrameRenderer(
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val overlayPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val bitmapPool = HashMap<String, Bitmap>()
+    private var frameIndex = 0
+    private var smoothedAmplitude = 0f
 
     fun registerBitmap(key: String, bitmap: Bitmap) {
         bitmapPool[key] = bitmap
@@ -42,12 +46,16 @@ class SceneFrameRenderer(
         val outputBitmap = Bitmap.createBitmap(outputWidth, outputHeight, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(outputBitmap)
 
+        frameIndex++
+        smoothedAmplitude = smoothedAmplitude * 0.6f + audioAmplitude * 0.4f
+        val performanceState = applyPerformanceMotion(cameraState, smoothedAmplitude * smoothedAmplitude)
+
         drawBaseBackground(canvas, visualParameters)
 
         if (aiFrameOverride != null) {
-            drawAiFrameWithMotion(canvas, aiFrameOverride, cameraState)
+            drawAiFrameWithMotion(canvas, aiFrameOverride, performanceState)
         } else {
-            drawParallaxLayers(canvas, parallaxEngine, cameraState, backgroundKey)
+            drawParallaxLayers(canvas, parallaxEngine, performanceState, backgroundKey)
         }
 
         drawParticles(canvas, particleSnapshots)
@@ -61,6 +69,19 @@ class SceneFrameRenderer(
         drawFilmGrain(canvas)
 
         return outputBitmap
+    }
+
+    private fun applyPerformanceMotion(cameraState: CameraState, pulse: Float): CameraState {
+        val time = frameIndex.toFloat()
+        val swayX = sin(time * 0.045f) * outputWidth * 0.006f
+        val swayY = cos(time * 0.037f) * outputHeight * 0.004f
+        val jitterX = sin(time * 1.7f) * pulse * outputWidth * 0.004f
+        val jitterY = cos(time * 2.3f) * pulse * outputHeight * 0.004f
+        return CameraState(
+            x = cameraState.x + swayX + jitterX,
+            y = cameraState.y + swayY + jitterY,
+            zoom = cameraState.zoom * (1.03f + 0.035f * pulse)
+        )
     }
 
     private fun drawAiFrameWithMotion(canvas: Canvas, aiFrame: Bitmap, cameraState: CameraState) {
