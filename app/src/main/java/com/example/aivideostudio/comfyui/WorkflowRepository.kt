@@ -39,7 +39,8 @@ class WorkflowRepository {
                 supportsCfg = rawJson.contains(WorkflowPlaceholders.CFG),
                 supportsFrames = rawJson.contains(WorkflowPlaceholders.FRAMES),
                 supportsFps = rawJson.contains(WorkflowPlaceholders.FPS),
-                supportsReferenceImage = rawJson.contains(WorkflowPlaceholders.REFERENCE_IMAGE)
+                supportsReferenceImage = rawJson.contains(WorkflowPlaceholders.REFERENCE_IMAGE) ||
+                    rawJson.contains(WorkflowPlaceholders.REFERENCE_IMAGE_NAME)
             )
 
             appendToManifest(context, storedWorkflow)
