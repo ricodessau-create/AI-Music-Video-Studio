@@ -8,7 +8,7 @@ import androidx.room.RoomDatabase
 @Database(
     entities = [ProjectEntity::class, SceneEntity::class],
     version = 5,
-    exportSchema = false
+    exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
 
@@ -24,7 +24,7 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "ai_video_studio.db"
-                ).fallbackToDestructiveMigration().build().also { instance = it }
+                ).fallbackToDestructiveMigrationFrom(1, 2, 3, 4).build().also { instance = it }
             }
         }
     }
