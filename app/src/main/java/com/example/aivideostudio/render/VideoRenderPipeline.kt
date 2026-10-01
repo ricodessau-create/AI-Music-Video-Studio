@@ -49,7 +49,8 @@ class VideoRenderPipeline(
     ) {
         var encoder: VideoEncoder? = null
         var frameRenderer: SceneFrameRenderer? = null
-        val aiFrameSources = HashMap<String, AiSceneFrameSource>()
+        val aiFrameSources =
+            HashMap<String, AiSceneFrameSource>()
 
         try {
             require(scenes.isNotEmpty()) {
@@ -80,6 +81,7 @@ class VideoRenderPipeline(
                 )
 
             encoder = createdEncoder
+
             createdEncoder.start()
 
             val createdFrameRenderer =
@@ -88,7 +90,8 @@ class VideoRenderPipeline(
                     renderSettings.resolutionHeight
                 )
 
-            frameRenderer = createdFrameRenderer
+            frameRenderer =
+                createdFrameRenderer
 
             val effectiveBackgroundPaths =
                 HashMap(backgroundImagePaths)
@@ -96,9 +99,13 @@ class VideoRenderPipeline(
             if (!characterReferenceImagePath.isNullOrBlank()) {
                 for (scene in scenes) {
                     if (
-                        !effectiveBackgroundPaths.containsKey(scene.id)
+                        !effectiveBackgroundPaths.containsKey(
+                            scene.id
+                        )
                     ) {
-                        effectiveBackgroundPaths[scene.id] =
+                        effectiveBackgroundPaths[
+                            scene.id
+                        ] =
                             characterReferenceImagePath
                     }
                 }
@@ -109,7 +116,10 @@ class VideoRenderPipeline(
                 effectiveBackgroundPaths
             )
 
-            for ((sceneId, mediaInfo) in aiGeneratedMedia) {
+            for (
+                (sceneId, mediaInfo)
+                in aiGeneratedMedia
+            ) {
                 val file =
                     File(mediaInfo.filePath)
 
@@ -123,14 +133,20 @@ class VideoRenderPipeline(
 
                 val source =
                     AiSceneFrameSource(
-                        filePath = mediaInfo.filePath,
-                        mediaType = mediaInfo.mediaType,
-                        outputWidth = renderSettings.resolutionWidth,
-                        outputHeight = renderSettings.resolutionHeight
+                        filePath =
+                            mediaInfo.filePath,
+                        mediaType =
+                            mediaInfo.mediaType,
+                        outputWidth =
+                            renderSettings.resolutionWidth,
+                        outputHeight =
+                            renderSettings.resolutionHeight
                     )
 
                 source.prepare()
-                aiFrameSources[sceneId] = source
+
+                aiFrameSources[sceneId] =
+                    source
             }
 
             val totalDuration =
@@ -152,13 +168,17 @@ class VideoRenderPipeline(
 
             var currentSceneIndex = 0
 
-            for (frameNumber in 0 until totalFrames) {
+            for (
+                frameNumber in 0 until totalFrames
+            ) {
                 val timeSeconds =
                     frameNumber.toDouble() /
-                        renderSettings.frameRate.toDouble()
+                        renderSettings.frameRate
+                            .toDouble()
 
                 while (
-                    currentSceneIndex < scenes.size - 1 &&
+                    currentSceneIndex <
+                    scenes.size - 1 &&
                     timeSeconds >=
                     scenes[currentSceneIndex]
                         .endTimeSeconds
@@ -190,7 +210,10 @@ class VideoRenderPipeline(
                             sceneDuration
                         )
                         .toFloat()
-                        .coerceIn(0f, 1f)
+                        .coerceIn(
+                            0f,
+                            1f
+                        )
 
                 val cameraController =
                     CameraMotionController(
@@ -207,9 +230,10 @@ class VideoRenderPipeline(
                     aiFrameSources[scene.id]
 
                 val aiFrameOverride =
-                    aiSource?.getFrameBitmapAtSceneProgress(
-                        sceneProgress
-                    )
+                    aiSource
+                        ?.getFrameBitmapAtSceneProgress(
+                            sceneProgress
+                        )
 
                 val parallaxLayers =
                     listOf(
@@ -236,13 +260,20 @@ class VideoRenderPipeline(
                     )
 
                 val particleSnapshots =
-                    HashMap<ParticleType, List<Particle>>()
+                    HashMap<
+                        ParticleType,
+                        List<Particle>
+                    >()
 
-                for ((type, system) in particleSystems) {
+                for (
+                    (type, system)
+                    in particleSystems
+                ) {
                     particleSnapshots[type] =
                         system.update(
                             1f /
-                                renderSettings.frameRate
+                                renderSettings
+                                    .frameRate
                                     .toFloat(),
                             scene.intensity
                         )
@@ -281,7 +312,8 @@ class VideoRenderPipeline(
                     (
                         timeSeconds *
                             1_000_000
-                        ).toLong()
+                        )
+                        .toLong()
 
                 createdEncoder.encodeFrame(
                     frameBitmap,
@@ -353,13 +385,17 @@ class VideoRenderPipeline(
                     finalOutputFile.absolutePath
                 )
             )
-        } catch (outOfMemory: OutOfMemoryError) {
+        } catch (
+            outOfMemory: OutOfMemoryError
+        ) {
             onProgress(
                 RenderProgress.Failed(
                     "Nicht genügend Arbeitsspeicher zum Rendern des Videos."
                 )
             )
-        } catch (exception: Exception) {
+        } catch (
+            exception: Exception
+        ) {
             onProgress(
                 RenderProgress.Failed(
                     exception.message
@@ -368,7 +404,9 @@ class VideoRenderPipeline(
                 )
             )
         } finally {
-            for (source in aiFrameSources.values) {
+            for (
+                source in aiFrameSources.values
+            ) {
                 source.release()
             }
 
@@ -380,7 +418,10 @@ class VideoRenderPipeline(
         frameRenderer: SceneFrameRenderer,
         backgroundImagePaths: Map<String, String>
     ) {
-        for ((sceneId, path) in backgroundImagePaths) {
+        for (
+            (sceneId, path)
+            in backgroundImagePaths
+        ) {
             val bitmap =
                 decodeBitmapSafely(path)
 
@@ -419,7 +460,9 @@ class VideoRenderPipeline(
                 file.absolutePath,
                 options
             )
-        } catch (exception: Exception) {
+        } catch (
+            exception: Exception
+        ) {
             null
         }
     }
@@ -428,9 +471,14 @@ class VideoRenderPipeline(
         visualParameters: VisualParameters
     ): Map<ParticleType, ParticleSystem> {
         val systems =
-            HashMap<ParticleType, ParticleSystem>()
+            HashMap<
+                ParticleType,
+                ParticleSystem
+            >()
 
-        if (visualParameters.hasSnowParticles) {
+        if (
+            visualParameters.hasSnowParticles
+        ) {
             systems[ParticleType.SNOW] =
                 ParticleSystem(
                     ParticleType.SNOW,
@@ -440,7 +488,9 @@ class VideoRenderPipeline(
                 )
         }
 
-        if (visualParameters.hasFireParticles) {
+        if (
+            visualParameters.hasFireParticles
+        ) {
             systems[ParticleType.FIRE] =
                 ParticleSystem(
                     ParticleType.FIRE,
@@ -450,7 +500,9 @@ class VideoRenderPipeline(
                 )
         }
 
-        if (visualParameters.hasRain) {
+        if (
+            visualParameters.hasRain
+        ) {
             systems[ParticleType.RAIN] =
                 ParticleSystem(
                     ParticleType.RAIN,
@@ -460,7 +512,9 @@ class VideoRenderPipeline(
                 )
         }
 
-        if (visualParameters.hasSmoke) {
+        if (
+            visualParameters.hasSmoke
+        ) {
             systems[ParticleType.SMOKE] =
                 ParticleSystem(
                     ParticleType.SMOKE,
@@ -477,7 +531,9 @@ class VideoRenderPipeline(
         audioFeatures: AudioFeatures,
         timeSeconds: Double
     ): Float {
-        if (audioFeatures.rmsEnergyCurve.isEmpty()) {
+        if (
+            audioFeatures.rmsEnergyCurve.isEmpty()
+        ) {
             return 0f
         }
 
@@ -487,14 +543,19 @@ class VideoRenderPipeline(
         val duration =
             audioFeatures.durationSeconds
 
-        if (duration <= 0.0) {
+        if (
+            duration <= 0.0
+        ) {
             return 0f
         }
 
         val index =
             (
-                (timeSeconds / duration) *
-                    frameCount
+                (
+                    timeSeconds /
+                        duration
+                    ) *
+                        frameCount
                 )
                 .toInt()
                 .coerceIn(
@@ -505,12 +566,18 @@ class VideoRenderPipeline(
         val maxEnergy =
             audioFeatures.rmsEnergyCurve
                 .max()
-                .coerceAtLeast(0.0001f)
+                .coerceAtLeast(
+                    0.0001f
+                )
 
         return (
-            audioFeatures.rmsEnergyCurve[index] /
+            audioFeatures
+                .rmsEnergyCurve[index] /
                 maxEnergy
             )
-            .coerceIn(0f, 1f)
+            .coerceIn(
+                0f,
+                1f
+            )
     }
 }
