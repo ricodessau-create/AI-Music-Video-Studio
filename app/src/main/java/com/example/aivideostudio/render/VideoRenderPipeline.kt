@@ -92,37 +92,15 @@ class VideoRenderPipeline(
             frameRenderer =
                 createdFrameRenderer
 
-            loadBitmaps(
+            loadBackgroundBitmaps(
                 createdFrameRenderer,
                 backgroundImagePaths
             )
 
-            for (
-                (sceneId, mediaInfo)
-                in aiGeneratedMedia
-            ) {
-                val file =
-                    File(mediaInfo.filePath)
-
-                if (
-                    !file.exists() ||
-                    !file.isFile ||
-                    file.length() <= 0L
-                ) {
-                    continue
-                }
-
-                val source =
-                    AiSceneFrameSource(
-                        filePath = mediaInfo.filePath,
-                        mediaType = mediaInfo.mediaType,
-                        outputWidth = renderSettings.resolutionWidth,
-                        outputHeight = renderSettings.resolutionHeight
-                    )
-
-                source.prepare()
-                aiFrameSources[sceneId] = source
-            }
+            loadAiMedia(
+                aiGeneratedMedia,
+                aiFrameSources
+            )
 
             val totalDuration =
                 audioFeatures.durationSeconds
@@ -164,7 +142,7 @@ class VideoRenderPipeline(
                     scenes[
                         currentSceneIndex.coerceIn(
                             0,
-                            scenes.size - 1
+                            scenes.lastIndex
                         )
                     ]
 
@@ -184,7 +162,10 @@ class VideoRenderPipeline(
                             sceneDuration
                         )
                         .toFloat()
-                        .coerceIn(0f, 1f)
+                        .coerceIn(
+                            0f,
+                            1f
+                        )
 
                 val cameraController =
                     CameraMotionController(
@@ -200,29 +181,39 @@ class VideoRenderPipeline(
                 val aiSource =
                     aiFrameSources[scene.id]
 
-                val aiFrameOverride =
+                val aiFrame =
                     aiSource?.getFrameBitmapAtSceneProgress(
                         sceneProgress
                     )
 
+                val hasGeneratedVideo =
+                    aiSource != null &&
+                        aiGeneratedMedia[scene.id]
+                            ?.mediaType ==
+                        GeneratedMediaType.VIDEO
+
                 val parallaxLayers =
-                    listOf(
-                        ParallaxLayer(
-                            bitmapKey =
-                                "background_${scene.id}",
-                            depthFactor = 0.3f
-                        ),
-                        ParallaxLayer(
-                            bitmapKey =
-                                "background_${scene.id}",
-                            depthFactor = 0.6f
-                        ),
-                        ParallaxLayer(
-                            bitmapKey =
-                                "background_${scene.id}",
-                            depthFactor = 1.0f
+                    if (aiFrame == null) {
+                        listOf(
+                            ParallaxLayer(
+                                bitmapKey =
+                                    "background_${scene.id}",
+                                depthFactor = 0.3f
+                            ),
+                            ParallaxLayer(
+                                bitmapKey =
+                                    "background_${scene.id}",
+                                depthFactor = 0.6f
+                            ),
+                            ParallaxLayer(
+                                bitmapKey =
+                                    "background_${scene.id}",
+                                depthFactor = 1.0f
+                            )
                         )
-                    )
+                    } else {
+                        emptyList()
+                    }
 
                 val parallaxEngine =
                     ParallaxEngine(
@@ -255,22 +246,37 @@ class VideoRenderPipeline(
                         timeSeconds
                     )
 
+                val backgroundKey =
+                    if (
+                        aiFrame == null &&
+                        !hasGeneratedVideo
+                    ) {
+                        backgroundImagePaths[
+                            scene.id
+                        ]?.let {
+                            "background_${scene.id}"
+                        }
+                    } else {
+                        null
+                    }
+
                 val frameBitmap =
                     createdFrameRenderer.renderFrame(
                         scene = scene,
-                        visualParameters = visualParameters,
-                        parallaxEngine = parallaxEngine,
-                        cameraState = cameraState,
-                        particleSnapshots = particleSnapshots,
-                        audioAmplitude = amplitude,
+                        visualParameters =
+                            visualParameters,
+                        parallaxEngine =
+                            parallaxEngine,
+                        cameraState =
+                            cameraState,
+                        particleSnapshots =
+                            particleSnapshots,
+                        audioAmplitude =
+                            amplitude,
                         backgroundKey =
-                            backgroundImagePaths[
-                                scene.id
-                            ]?.let {
-                                "background_${scene.id}"
-                            },
+                            backgroundKey,
                         aiFrameOverride =
-                            aiFrameOverride
+                            aiFrame
                     )
 
                 val presentationTimeUs =
@@ -285,15 +291,17 @@ class VideoRenderPipeline(
                     presentationTimeUs
                 )
 
-                if (!frameBitmap.isRecycled) {
+                if (
+                    !frameBitmap.isRecycled
+                ) {
                     frameBitmap.recycle()
                 }
 
                 if (
-                    aiFrameOverride != null &&
-                    !aiFrameOverride.isRecycled
+                    aiFrame != null &&
+                    !aiFrame.isRecycled
                 ) {
-                    aiFrameOverride.recycle()
+                    aiFrame.recycle()
                 }
 
                 onProgress(
@@ -321,9 +329,12 @@ class VideoRenderPipeline(
             }
 
             AudioVideoMuxer(
-                videoOnlyFile = tempVideoFile,
-                originalAudioFilePath = songFilePath,
-                outputFile = finalOutputFile
+                videoOnlyFile =
+                    tempVideoFile,
+                originalAudioFilePath =
+                    songFilePath,
+                outputFile =
+                    finalOutputFile
             ).mux()
 
             if (tempVideoFile.exists()) {
@@ -368,10 +379,57 @@ class VideoRenderPipeline(
             }
 
             frameRenderer?.recycle()
+
+            encoder?.releaseSafely()
         }
     }
 
-    private fun loadBitmaps(
+    private fun loadAiMedia(
+        aiGeneratedMedia: Map<String, SceneMediaInfo>,
+        destinations: MutableMap<String, AiSceneFrameSource>
+    ) {
+        for (
+            (sceneId, mediaInfo)
+            in aiGeneratedMedia
+        ) {
+            if (
+                mediaInfo.mediaType ==
+                GeneratedMediaType.NONE
+            ) {
+                continue
+            }
+
+            val file =
+                File(mediaInfo.filePath)
+
+            if (
+                !file.exists() ||
+                !file.isFile ||
+                file.length() <= 0L
+            ) {
+                continue
+            }
+
+            val source =
+                AiSceneFrameSource(
+                    filePath =
+                        mediaInfo.filePath,
+                    mediaType =
+                        mediaInfo.mediaType,
+                    outputWidth =
+                        renderSettings.resolutionWidth,
+                    outputHeight =
+                        renderSettings.resolutionHeight
+                )
+
+            source.prepare()
+
+            destinations[sceneId] =
+                source
+        }
+    }
+
+    private fun loadBackgroundBitmaps(
         frameRenderer: SceneFrameRenderer,
         backgroundImagePaths: Map<String, String>
     ) {
@@ -493,7 +551,10 @@ class VideoRenderPipeline(
                 timeSeconds /
                     duration
                 )
-                .coerceIn(0.0, 1.0)
+                .coerceIn(
+                    0.0,
+                    1.0
+                )
 
         val index =
             (
@@ -514,6 +575,16 @@ class VideoRenderPipeline(
 
         return audioFeatures
             .rmsEnergyCurve[index]
-            .coerceIn(0f, 1f)
+            .coerceIn(
+                0f,
+                1f
+            )
+    }
+}
+
+private fun VideoEncoder.releaseSafely() {
+    try {
+        release()
+    } catch (_: Exception) {
     }
 }

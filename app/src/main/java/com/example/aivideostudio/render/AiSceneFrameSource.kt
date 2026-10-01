@@ -13,7 +13,7 @@ class AiSceneFrameSource(
 ) {
 
     private var videoRetriever: MediaMetadataRetriever? = null
-    private var videoDurationMicros: Long = 0L
+    private var videoDurationMicros = 0L
     private var staticBitmap: Bitmap? = null
 
     fun prepare() {
@@ -25,55 +25,92 @@ class AiSceneFrameSource(
             }
 
             GeneratedMediaType.VIDEO -> {
-                val retriever = MediaMetadataRetriever()
-                retriever.setDataSource(filePath)
-                videoRetriever = retriever
+                val file = java.io.File(filePath)
 
-                val durationString = retriever.extractMetadata(
-                    MediaMetadataRetriever.METADATA_KEY_DURATION
+                require(
+                    file.exists() &&
+                        file.isFile &&
+                        file.length() > 0L
+                ) {
+                    "Generiertes Video nicht gefunden: $filePath"
+                }
+
+                val retriever =
+                    MediaMetadataRetriever()
+
+                retriever.setDataSource(
+                    file.absolutePath
                 )
 
+                videoRetriever = retriever
+
+                val duration =
+                    retriever.extractMetadata(
+                        MediaMetadataRetriever.METADATA_KEY_DURATION
+                    )?.toLongOrNull()
+
                 videoDurationMicros =
-                    (durationString?.toLongOrNull() ?: 0L) * 1000L
+                    (duration ?: 0L) * 1000L
+
+                require(videoDurationMicros > 0L) {
+                    "Das generierte Video besitzt keine gültige Dauer."
+                }
             }
 
             GeneratedMediaType.NONE -> Unit
         }
     }
 
-    fun getFrameBitmapAtSceneProgress(sceneProgress: Float): Bitmap? {
+    fun getFrameBitmapAtSceneProgress(
+        sceneProgress: Float
+    ): Bitmap? {
         return when (mediaType) {
             GeneratedMediaType.IMAGE -> {
-                val source = staticBitmap ?: return null
-                if (source.isRecycled) {
-                    null
-                } else {
-                    source.copy(Bitmap.Config.ARGB_8888, false)
+                val bitmap =
+                    staticBitmap ?: return null
+
+                if (bitmap.isRecycled) {
+                    return null
                 }
+
+                bitmap.copy(
+                    Bitmap.Config.ARGB_8888,
+                    false
+                )
             }
 
             GeneratedMediaType.VIDEO -> {
-                val retriever = videoRetriever ?: return null
+                val retriever =
+                    videoRetriever ?: return null
 
                 if (videoDurationMicros <= 0L) {
                     return null
                 }
 
-                val loopedProgress =
-                    sceneProgress.coerceIn(0f, 1f)
+                val progress =
+                    sceneProgress.coerceIn(
+                        0f,
+                        1f
+                    )
 
-                val targetTimeMicros =
-                    (loopedProgress * videoDurationMicros).toLong()
+                val timestamp =
+                    (
+                        progress *
+                            videoDurationMicros
+                        ).toLong()
+                            .coerceIn(
+                                0L,
+                                videoDurationMicros - 1L
+                            )
 
                 val frame =
                     retriever.getFrameAtTime(
-                        targetTimeMicros,
-                        MediaMetadataRetriever.OPTION_CLOSEST_SYNC
+                        timestamp,
+                        MediaMetadataRetriever.OPTION_CLOSEST
                     )
+                        ?: return null
 
-                frame?.let {
-                    scaleBitmap(it)
-                }
+                scaleBitmap(frame)
             }
 
             GeneratedMediaType.NONE -> null
@@ -94,22 +131,57 @@ class AiSceneFrameSource(
         videoDurationMicros = 0L
     }
 
-    private fun decodeAndScale(path: String): Bitmap? {
-        val original =
-            BitmapFactory.decodeFile(path)
+    private fun decodeAndScale(
+        path: String
+    ): Bitmap? {
+        val file =
+            java.io.File(path)
+
+        if (
+            !file.exists() ||
+            !file.isFile ||
+            file.length() <= 0L
+        ) {
+            return null
+        }
+
+        val bitmap =
+            BitmapFactory.decodeFile(
+                file.absolutePath
+            )
                 ?: return null
 
-        val scaled =
-            scaleBitmap(original)
+        return scaleAndRecycleSource(
+            bitmap
+        )
+    }
 
-        if (scaled !== original && !original.isRecycled) {
-            original.recycle()
+    private fun scaleAndRecycleSource(
+        bitmap: Bitmap
+    ): Bitmap {
+        if (
+            bitmap.width == outputWidth &&
+            bitmap.height == outputHeight
+        ) {
+            return bitmap
+        }
+
+        val scaled =
+            scaleBitmap(bitmap)
+
+        if (
+            scaled !== bitmap &&
+            !bitmap.isRecycled
+        ) {
+            bitmap.recycle()
         }
 
         return scaled
     }
 
-    private fun scaleBitmap(bitmap: Bitmap): Bitmap {
+    private fun scaleBitmap(
+        bitmap: Bitmap
+    ): Bitmap {
         if (
             bitmap.width == outputWidth &&
             bitmap.height == outputHeight
