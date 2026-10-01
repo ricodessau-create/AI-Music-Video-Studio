@@ -203,8 +203,7 @@ class VideoEncoder(
         log("FrameRate=$frameRate")
         log("Bitrate=$bitrate")
 
-        val codecName =
-            findSurfaceEncoderCodec()
+        val codecName = findSurfaceEncoderCodec()
 
         selectedCodecName = codecName
 
@@ -249,16 +248,6 @@ class VideoEncoder(
                 2
             )
 
-            log("MIME=${MediaFormat.MIMETYPE_VIDEO_AVC}")
-            log(
-                "COLOR_FORMAT=" +
-                    MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface +
-                    " (COLOR_FormatSurface)"
-            )
-            log("BIT_RATE=$bitrate")
-            log("FRAME_RATE=$frameRate")
-            log("I_FRAME_INTERVAL=2")
-
             codec.configure(
                 format,
                 null,
@@ -266,14 +255,8 @@ class VideoEncoder(
                 MediaCodec.CONFIGURE_FLAG_ENCODE
             )
 
-            log("codec.configure() erfolgreich.")
-
             inputSurface =
                 codec.createInputSurface()
-
-            log(
-                "MediaCodec Input Surface erfolgreich erstellt."
-            )
 
             muxer =
                 MediaMuxer(
@@ -281,17 +264,11 @@ class VideoEncoder(
                     MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4
                 )
 
-            log("MediaMuxer erfolgreich erstellt.")
-
             encoder = codec
 
             codec.start()
 
-            log("codec.start() erfolgreich.")
-
             initializeEgl()
-
-            log("EGL/OpenGL erfolgreich initialisiert.")
 
             started = true
             frameCount = 0L
@@ -346,26 +323,10 @@ class VideoEncoder(
         val currentFrame =
             frameCount + 1L
 
-        log(
-            "--------------------------------------------------"
+        renderBitmapToSurface(
+            bitmap = bitmap,
+            presentationTimeUs = presentationTimeUs
         )
-        log("FRAME #$currentFrame")
-        log("presentationTimeUs=$presentationTimeUs")
-        log("bitmap=${bitmap.width}x${bitmap.height}")
-        log("bitmapConfig=${bitmap.config}")
-
-        try {
-            renderBitmapToSurface(
-                bitmap = bitmap,
-                presentationTimeUs = presentationTimeUs
-            )
-        } catch (exception: Exception) {
-            logError(
-                "EGL/OpenGL Rendering für Frame #$currentFrame fehlgeschlagen.",
-                exception
-            )
-            throw exception
-        }
 
         frameCount++
         lastPresentationTimeUs = presentationTimeUs
@@ -379,11 +340,6 @@ class VideoEncoder(
             )
             throw exception
         }
-
-        log(
-            "Frame #$currentFrame abgeschlossen. " +
-                "writtenSamples=$writtenSampleCount"
-        )
     }
 
     fun finish() {
@@ -392,11 +348,6 @@ class VideoEncoder(
             return
         }
 
-        log("==================================================")
-        log("VIDEO ENCODER FINISH")
-        log("Frames verarbeitet=$frameCount")
-        log("Samples geschrieben=$writtenSampleCount")
-
         val codec =
             encoder
                 ?: throw IllegalStateException(
@@ -404,15 +355,7 @@ class VideoEncoder(
                 )
 
         try {
-            log(
-                "signalEndOfInputStream() wird aufgerufen."
-            )
-
             codec.signalEndOfInputStream()
-
-            log(
-                "signalEndOfInputStream() erfolgreich."
-            )
 
             var eosReached = false
             var drainPasses = 0
@@ -428,29 +371,19 @@ class VideoEncoder(
                     )
                 }
 
-                log(
-                    "EOS drain pass #$drainPasses"
-                )
-
                 eosReached =
                     drainEncoder(true)
             }
 
-            log(
-                "End-of-stream erfolgreich erreicht."
-            )
-
             if (!muxerStarted) {
                 throw IllegalStateException(
-                    "Der MP4-Muxer wurde nie gestartet. " +
-                        "Es wurde kein gültiger Video-Track erzeugt."
+                    "Der MP4-Muxer wurde nie gestartet."
                 )
             }
 
             if (writtenSampleCount <= 0L) {
                 throw IllegalStateException(
-                    "Der Encoder hat keine Videoframes " +
-                        "in die MP4-Datei geschrieben."
+                    "Der Encoder hat keine Videoframes geschrieben."
                 )
             }
 
@@ -497,18 +430,10 @@ class VideoEncoder(
 
         while (true) {
             val outputIndex =
-                try {
-                    codec.dequeueOutputBuffer(
-                        bufferInfo,
-                        timeoutUs
-                    )
-                } catch (exception: Exception) {
-                    logError(
-                        "dequeueOutputBuffer() fehlgeschlagen.",
-                        exception
-                    )
-                    throw exception
-                }
+                codec.dequeueOutputBuffer(
+                    bufferInfo,
+                    timeoutUs
+                )
 
             when {
                 outputIndex ==
@@ -518,10 +443,6 @@ class VideoEncoder(
 
                 outputIndex ==
                     MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
-                    log(
-                        "INFO_OUTPUT_FORMAT_CHANGED"
-                    )
-
                     if (muxerStarted) {
                         throw IllegalStateException(
                             "Das Encoder-Ausgabeformat wurde mehrfach geändert."
@@ -530,10 +451,6 @@ class VideoEncoder(
 
                     val outputFormat =
                         codec.outputFormat
-
-                    log(
-                        "Encoder outputFormat=$outputFormat"
-                    )
 
                     val currentMuxer =
                         muxer
@@ -546,14 +463,8 @@ class VideoEncoder(
                             outputFormat
                         )
 
-                    log(
-                        "Muxer trackIndex=$trackIndex hinzugefügt."
-                    )
-
                     currentMuxer.start()
                     muxerStarted = true
-
-                    log("Muxer gestartet.")
                 }
 
                 outputIndex >= 0 -> {
@@ -562,19 +473,18 @@ class VideoEncoder(
                             outputIndex
                         )
 
-                    log(
-                        "OutputBuffer #$outputIndex: " +
-                            "offset=${bufferInfo.offset}, " +
-                            "size=${bufferInfo.size}, " +
-                            "pts=${bufferInfo.presentationTimeUs}, " +
-                            "flags=${bufferInfo.flags}"
-                    )
+                    val isCodecConfig =
+                        (
+                            bufferInfo.flags and
+                                MediaCodec.BUFFER_FLAG_CODEC_CONFIG
+                            ) != 0
 
                     if (
                         encodedData != null &&
                         bufferInfo.size > 0 &&
                         muxerStarted &&
-                        trackIndex >= 0
+                        trackIndex >= 0 &&
+                        !isCodecConfig
                     ) {
                         encodedData.position(
                             bufferInfo.offset
@@ -592,37 +502,13 @@ class VideoEncoder(
                         )
 
                         writtenSampleCount++
-
-                        log(
-                            "Output-Sample geschrieben. " +
-                                "sampleCount=$writtenSampleCount"
-                        )
                     }
-
-                    val isCodecConfig =
-                        (
-                            bufferInfo.flags and
-                                MediaCodec.BUFFER_FLAG_CODEC_CONFIG
-                            ) != 0
-
-                    val isKeyFrame =
-                        (
-                            bufferInfo.flags and
-                                MediaCodec.BUFFER_FLAG_KEY_FRAME
-                            ) != 0
 
                     val isEndOfStream =
                         (
                             bufferInfo.flags and
                                 MediaCodec.BUFFER_FLAG_END_OF_STREAM
                             ) != 0
-
-                    log(
-                        "Output flags: " +
-                            "codecConfig=$isCodecConfig, " +
-                            "keyFrame=$isKeyFrame, " +
-                            "eos=$isEndOfStream"
-                    )
 
                     codec.releaseOutputBuffer(
                         outputIndex,
@@ -631,21 +517,11 @@ class VideoEncoder(
 
                     if (isEndOfStream) {
                         eosReached = true
-
-                        log(
-                            "BUFFER_FLAG_END_OF_STREAM erreicht."
-                        )
-
                         return true
                     }
                 }
 
                 else -> {
-                    log(
-                        "Unerwarteter dequeueOutputBuffer() Wert: " +
-                            "$outputIndex"
-                    )
-
                     return eosReached
                 }
             }
@@ -674,18 +550,6 @@ class VideoEncoder(
             "EGL Surface ist nicht initialisiert."
         }
 
-        check(
-            shaderProgram != 0
-        ) {
-            "OpenGL Shader ist nicht initialisiert."
-        }
-
-        check(
-            textureId != 0
-        ) {
-            "OpenGL Texture ist nicht initialisiert."
-        }
-
         if (
             !EGL14.eglMakeCurrent(
                 eglDisplay,
@@ -706,16 +570,8 @@ class VideoEncoder(
             height
         )
 
-        checkGlError(
-            "glViewport()"
-        )
-
         GLES20.glUseProgram(
             shaderProgram
-        )
-
-        checkGlError(
-            "glUseProgram()"
         )
 
         GLES20.glActiveTexture(
@@ -725,10 +581,6 @@ class VideoEncoder(
         GLES20.glBindTexture(
             GLES20.GL_TEXTURE_2D,
             textureId
-        )
-
-        checkGlError(
-            "glBindTexture()"
         )
 
         GLES20.glTexParameteri(
@@ -762,10 +614,6 @@ class VideoEncoder(
             0
         )
 
-        checkGlError(
-            "GLUtils.texImage2D()"
-        )
-
         vertexBuffer.position(0)
 
         GLES20.glEnableVertexAttribArray(
@@ -781,10 +629,6 @@ class VideoEncoder(
             vertexBuffer
         )
 
-        checkGlError(
-            "glVertexAttribPointer(position)"
-        )
-
         textureBuffer.position(0)
 
         GLES20.glEnableVertexAttribArray(
@@ -798,10 +642,6 @@ class VideoEncoder(
             false,
             0,
             textureBuffer
-        )
-
-        checkGlError(
-            "glVertexAttribPointer(texture)"
         )
 
         GLES20.glUniform1i(
@@ -824,10 +664,6 @@ class VideoEncoder(
             GLES20.GL_TRIANGLE_STRIP,
             0,
             4
-        )
-
-        checkGlError(
-            "glDrawArrays()"
         )
 
         GLES20.glDisableVertexAttribArray(
@@ -898,10 +734,6 @@ class VideoEncoder(
             )
         }
 
-        log(
-            "EGL version=${version[0]}.${version[1]}"
-        )
-
         val configAttributes =
             intArrayOf(
                 EGL14.EGL_RED_SIZE,
@@ -932,7 +764,7 @@ class VideoEncoder(
                 0,
                 configs,
                 0,
-                configs.size,
+                1,
                 numConfigs,
                 0
             )
@@ -972,17 +804,12 @@ class VideoEncoder(
             )
         }
 
-        val surfaceAttributes =
-            intArrayOf(
-                EGL14.EGL_NONE
-            )
-
         eglSurface =
             EGL14.eglCreateWindowSurface(
                 eglDisplay,
                 config,
                 surface,
-                surfaceAttributes,
+                intArrayOf(EGL14.EGL_NONE),
                 0
             )
 
@@ -1003,19 +830,39 @@ class VideoEncoder(
             )
         ) {
             throwEglError(
-                "eglMakeCurrent() bei Initialisierung fehlgeschlagen."
+                "eglMakeCurrent() bei EGL-Initialisierung fehlgeschlagen."
             )
         }
 
-        createGlProgram()
-        createGlTexture()
+        shaderProgram =
+            createShaderProgram()
 
-        checkGlError(
-            "EGL/OpenGL Initialisierung"
+        textureId =
+            createTexture()
+
+        log(
+            "EGL initialisiert: ${version[0]}.${version[1]}"
         )
     }
 
-    private fun createGlProgram() {
+    private fun createTexture(): Int {
+        val textures =
+            IntArray(1)
+
+        GLES20.glGenTextures(
+            1,
+            textures,
+            0
+        )
+
+        checkGlError(
+            "glGenTextures()"
+        )
+
+        return textures[0]
+    }
+
+    private fun createShaderProgram(): Int {
         val vertexShaderSource =
             """
             attribute vec4 aPosition;
@@ -1055,7 +902,7 @@ class VideoEncoder(
                 fragmentShaderSource
             )
 
-        shaderProgram =
+        val program =
             GLES20.glCreateProgram()
 
         checkGlError(
@@ -1063,71 +910,60 @@ class VideoEncoder(
         )
 
         GLES20.glAttachShader(
-            shaderProgram,
+            program,
             vertexShader
         )
 
         GLES20.glAttachShader(
-            shaderProgram,
+            program,
             fragmentShader
         )
 
         GLES20.glLinkProgram(
-            shaderProgram
+            program
         )
 
         val linkStatus =
             IntArray(1)
 
         GLES20.glGetProgramiv(
-            shaderProgram,
+            program,
             GLES20.GL_LINK_STATUS,
             linkStatus,
             0
         )
 
-        if (
-            linkStatus[0] == 0
-        ) {
+        if (linkStatus[0] == 0) {
             val info =
                 GLES20.glGetProgramInfoLog(
-                    shaderProgram
+                    program
                 )
 
-            GLES20.glDeleteProgram(
-                shaderProgram
-            )
-
-            shaderProgram = 0
+            GLES20.glDeleteProgram(program)
 
             throw IllegalStateException(
-                "OpenGL Shader-Linking fehlgeschlagen: $info"
+                "OpenGL Shader-Programm konnte nicht gelinkt werden: $info"
             )
         }
 
-        GLES20.glDeleteShader(
-            vertexShader
-        )
-
-        GLES20.glDeleteShader(
-            fragmentShader
-        )
+        GLES20.glDeleteShader(vertexShader)
+        GLES20.glDeleteShader(fragmentShader)
 
         positionHandle =
             GLES20.glGetAttribLocation(
-                shaderProgram,
+                program,
                 "aPosition"
             )
 
         texCoordHandle =
             GLES20.glGetAttribLocation(
-                shaderProgram,
+                program,
                 "aTexCoord"
             )
 
         textureHandle =
             GLES20.glGetUniformLocation(
-                shaderProgram,
+                program,
                 "uTexture"
             )
 
@@ -1136,14 +972,14 @@ class VideoEncoder(
             texCoordHandle < 0 ||
             textureHandle < 0
         ) {
+            GLES20.glDeleteProgram(program)
+
             throw IllegalStateException(
                 "OpenGL Shader-Handles konnten nicht gefunden werden."
             )
         }
 
-        log(
-            "OpenGL Shader erfolgreich erstellt."
-        )
+        return program
     }
 
     private fun compileShader(
@@ -1176,84 +1012,20 @@ class VideoEncoder(
             0
         )
 
-        if (
-            compileStatus[0] == 0
-        ) {
+        if (compileStatus[0] == 0) {
             val info =
                 GLES20.glGetShaderInfoLog(
                     shader
                 )
 
-            GLES20.glDeleteShader(
-                shader
-            )
+            GLES20.glDeleteShader(shader)
 
             throw IllegalStateException(
-                "OpenGL Shader-Kompilierung fehlgeschlagen: $info"
+                "OpenGL Shader konnte nicht kompiliert werden: $info"
             )
         }
 
         return shader
-    }
-
-    private fun createGlTexture() {
-        val textures =
-            IntArray(1)
-
-        GLES20.glGenTextures(
-            1,
-            textures,
-            0
-        )
-
-        textureId =
-            textures[0]
-
-        if (
-            textureId == 0
-        ) {
-            throw IllegalStateException(
-                "OpenGL Texture konnte nicht erstellt werden."
-            )
-        }
-
-        GLES20.glBindTexture(
-            GLES20.GL_TEXTURE_2D,
-            textureId
-        )
-
-        GLES20.glTexParameteri(
-            GLES20.GL_TEXTURE_2D,
-            GLES20.GL_TEXTURE_MIN_FILTER,
-            GLES20.GL_LINEAR
-        )
-
-        GLES20.glTexParameteri(
-            GLES20.GL_TEXTURE_2D,
-            GLES20.GL_TEXTURE_MAG_FILTER,
-            GLES20.GL_LINEAR
-        )
-
-        GLES20.glTexParameteri(
-            GLES20.GL_TEXTURE_2D,
-            GLES20.GL_TEXTURE_WRAP_S,
-            GLES20.GL_CLAMP_TO_EDGE
-        )
-
-        GLES20.glTexParameteri(
-            GLES20.GL_TEXTURE_2D,
-            GLES20.GL_TEXTURE_WRAP_T,
-            GLES20.GL_CLAMP_TO_EDGE
-        )
-
-        GLES20.glBindTexture(
-            GLES20.GL_TEXTURE_2D,
-            0
-        )
-
-        log(
-            "OpenGL Texture erstellt: id=$textureId"
-        )
     }
 
     private fun findSurfaceEncoderCodec(): String {
@@ -1264,77 +1036,42 @@ class VideoEncoder(
 
         val candidates =
             codecList.codecInfos
-                .filter { codecInfo ->
-                    if (!codecInfo.isEncoder) {
-                        return@filter false
-                    }
-
-                    val supportsAvc =
-                        codecInfo.supportedTypes.any { type ->
-                            type.equals(
+                .filter { info ->
+                    info.isEncoder &&
+                        info.supportedTypes.any {
+                            it.equals(
                                 MediaFormat.MIMETYPE_VIDEO_AVC,
                                 ignoreCase = true
                             )
                         }
+                }
 
-                    if (!supportsAvc) {
-                        return@filter false
-                    }
-
-                    val capabilities =
-                        try {
-                            codecInfo.getCapabilitiesForType(
-                                MediaFormat.MIMETYPE_VIDEO_AVC
-                            )
-                        } catch (_: Exception) {
-                            return@filter false
-                        }
-
-                    val supportsSurface =
-                        capabilities.colorFormats.contains(
-                            MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface
-                        )
-
-                    if (!supportsSurface) {
-                        return@filter false
-                    }
-
-                    val videoCapabilities =
-                        capabilities.videoCapabilities
-
-                    videoCapabilities.isSizeSupported(
-                        width,
-                        height
+        for (codecInfo in candidates) {
+            val capabilities =
+                try {
+                    codecInfo.getCapabilitiesForType(
+                        MediaFormat.MIMETYPE_VIDEO_AVC
                     )
-                }
-                .sortedBy { codecInfo ->
-                    val name =
-                        codecInfo.name.lowercase()
-
-                    when {
-                        name.contains("google") -> 3
-                        name.contains("android") -> 2
-                        name.contains("sw") -> 2
-                        else -> 0
-                    }
+                } catch (_: Exception) {
+                    continue
                 }
 
-        if (candidates.isEmpty()) {
-            throw IllegalStateException(
-                "Auf diesem Gerät wurde kein AVC-Encoder " +
-                    "mit COLOR_FormatSurface für " +
-                    "${width}x$height gefunden."
-            )
+            val supportsSurface =
+                capabilities.colorFormats.any {
+                    it ==
+                        MediaCodecInfo
+                            .CodecCapabilities
+                            .COLOR_FormatSurface
+                }
+
+            if (supportsSurface) {
+                return codecInfo.name
+            }
         }
 
-        candidates.forEach { codecInfo ->
-            log(
-                "Surface-Encoder Kandidat: " +
-                    codecInfo.name
-            )
-        }
-
-        return candidates.first().name
+        throw IllegalStateException(
+            "Kein AVC-Encoder mit COLOR_FormatSurface gefunden."
+        )
     }
 
     private fun checkGlError(
@@ -1343,208 +1080,212 @@ class VideoEncoder(
         val error =
             GLES20.glGetError()
 
-        if (
-            error != GLES20.GL_NO_ERROR
-        ) {
+        if (error != GLES20.GL_NO_ERROR) {
             throw IllegalStateException(
-                "$operation: OpenGL Fehler 0x" +
+                "$operation: OpenGL-Fehler 0x" +
                     Integer.toHexString(error)
             )
         }
     }
 
     private fun throwEglError(
-        message: String
+        operation: String
     ): Nothing {
         val error =
             EGL14.eglGetError()
 
         throw IllegalStateException(
-            "$message EGL Fehler 0x" +
+            "$operation EGL-Fehler 0x" +
                 Integer.toHexString(error)
         )
     }
 
-    private fun release() {
+    fun release() {
         log("release() gestartet.")
 
         try {
             if (
                 eglDisplay != EGL14.EGL_NO_DISPLAY &&
-                eglSurface != EGL14.EGL_NO_SURFACE
+                eglContext != EGL14.EGL_NO_CONTEXT
             ) {
-                EGL14.eglMakeCurrent(
-                    eglDisplay,
-                    EGL14.EGL_NO_SURFACE,
-                    EGL14.EGL_NO_SURFACE,
-                    EGL14.EGL_NO_CONTEXT
-                )
+                try {
+                    EGL14.eglMakeCurrent(
+                        eglDisplay,
+                        EGL14.EGL_NO_SURFACE,
+                        EGL14.EGL_NO_SURFACE,
+                        EGL14.EGL_NO_CONTEXT
+                    )
+                } catch (exception: Exception) {
+                    logError(
+                        "eglMakeCurrent() beim Freigeben fehlgeschlagen.",
+                        exception
+                    )
+                }
             }
-        } catch (exception: Exception) {
-            logError(
-                "eglMakeCurrent() beim Release fehlgeschlagen.",
-                exception
-            )
-        }
 
-        if (
-            textureId != 0 &&
-            eglDisplay != EGL14.EGL_NO_DISPLAY
-        ) {
-            try {
-                GLES20.glDeleteTextures(
-                    1,
-                    intArrayOf(textureId),
-                    0
-                )
-            } catch (exception: Exception) {
-                logError(
-                    "OpenGL Texture konnte nicht gelöscht werden.",
-                    exception
-                )
+            if (
+                textureId != 0 &&
+                eglDisplay != EGL14.EGL_NO_DISPLAY &&
+                eglContext != EGL14.EGL_NO_CONTEXT
+            ) {
+                try {
+                    GLES20.glDeleteTextures(
+                        1,
+                        intArrayOf(textureId),
+                        0
+                    )
+                } catch (exception: Exception) {
+                    logError(
+                        "OpenGL Texture konnte nicht freigegeben werden.",
+                        exception
+                    )
+                }
             }
 
             textureId = 0
-        }
 
-        if (
-            shaderProgram != 0 &&
-            eglDisplay != EGL14.EGL_NO_DISPLAY
-        ) {
-            try {
-                GLES20.glDeleteProgram(
-                    shaderProgram
-                )
-            } catch (exception: Exception) {
-                logError(
-                    "OpenGL Shader-Programm konnte nicht gelöscht werden.",
-                    exception
-                )
+            if (
+                shaderProgram != 0 &&
+                eglDisplay != EGL14.EGL_NO_DISPLAY &&
+                eglContext != EGL14.EGL_NO_CONTEXT
+            ) {
+                try {
+                    GLES20.glDeleteProgram(
+                        shaderProgram
+                    )
+                } catch (exception: Exception) {
+                    logError(
+                        "OpenGL Shader-Programm konnte nicht freigegeben werden.",
+                        exception
+                    )
+                }
             }
 
             shaderProgram = 0
-        }
 
-        if (
-            eglDisplay != EGL14.EGL_NO_DISPLAY &&
-            eglSurface != EGL14.EGL_NO_SURFACE
-        ) {
+            if (
+                eglDisplay != EGL14.EGL_NO_DISPLAY &&
+                eglSurface != EGL14.EGL_NO_SURFACE
+            ) {
+                try {
+                    EGL14.eglDestroySurface(
+                        eglDisplay,
+                        eglSurface
+                    )
+                } catch (exception: Exception) {
+                    logError(
+                        "EGL Surface konnte nicht freigegeben werden.",
+                        exception
+                    )
+                }
+            }
+
+            eglSurface =
+                EGL14.EGL_NO_SURFACE
+
+            if (
+                eglDisplay != EGL14.EGL_NO_DISPLAY &&
+                eglContext != EGL14.EGL_NO_CONTEXT
+            ) {
+                try {
+                    EGL14.eglDestroyContext(
+                        eglDisplay,
+                        eglContext
+                    )
+                } catch (exception: Exception) {
+                    logError(
+                        "EGL Context konnte nicht freigegeben werden.",
+                        exception
+                    )
+                }
+            }
+
+            eglContext =
+                EGL14.EGL_NO_CONTEXT
+
+            if (
+                eglDisplay != EGL14.EGL_NO_DISPLAY
+            ) {
+                try {
+                    EGL14.eglTerminate(
+                        eglDisplay
+                    )
+                } catch (exception: Exception) {
+                    logError(
+                        "EGL Display konnte nicht beendet werden.",
+                        exception
+                    )
+                }
+            }
+
+            eglDisplay =
+                EGL14.EGL_NO_DISPLAY
+
             try {
-                EGL14.eglDestroySurface(
-                    eglDisplay,
-                    eglSurface
-                )
+                inputSurface?.release()
             } catch (exception: Exception) {
                 logError(
-                    "EGL Surface konnte nicht zerstört werden.",
+                    "MediaCodec Input Surface konnte nicht freigegeben werden.",
                     exception
                 )
             }
-        }
 
-        eglSurface =
-            EGL14.EGL_NO_SURFACE
+            inputSurface = null
 
-        if (
-            eglDisplay != EGL14.EGL_NO_DISPLAY &&
-            eglContext != EGL14.EGL_NO_CONTEXT
-        ) {
             try {
-                EGL14.eglDestroyContext(
-                    eglDisplay,
-                    eglContext
-                )
+                encoder?.stop()
             } catch (exception: Exception) {
                 logError(
-                    "EGL Context konnte nicht zerstört werden.",
+                    "Encoder.stop() fehlgeschlagen.",
                     exception
                 )
             }
-        }
 
-        eglContext =
-            EGL14.EGL_NO_CONTEXT
-
-        if (
-            eglDisplay != EGL14.EGL_NO_DISPLAY
-        ) {
             try {
-                EGL14.eglTerminate(
-                    eglDisplay
-                )
+                encoder?.release()
             } catch (exception: Exception) {
                 logError(
-                    "EGL Display konnte nicht beendet werden.",
+                    "Encoder.release() fehlgeschlagen.",
                     exception
                 )
             }
-        }
 
-        eglDisplay =
-            EGL14.EGL_NO_DISPLAY
+            encoder = null
 
-        try {
-            inputSurface?.release()
-        } catch (exception: Exception) {
-            logError(
-                "MediaCodec Input Surface konnte nicht freigegeben werden.",
-                exception
-            )
-        }
+            if (muxerStarted) {
+                try {
+                    muxer?.stop()
+                } catch (exception: Exception) {
+                    logError(
+                        "Muxer.stop() fehlgeschlagen.",
+                        exception
+                    )
+                }
+            }
 
-        inputSurface = null
-
-        try {
-            encoder?.stop()
-            log("Encoder.stop() erfolgreich.")
-        } catch (exception: Exception) {
-            logError(
-                "Encoder.stop() fehlgeschlagen.",
-                exception
-            )
-        }
-
-        try {
-            encoder?.release()
-            log("Encoder.release() erfolgreich.")
-        } catch (exception: Exception) {
-            logError(
-                "Encoder.release() fehlgeschlagen.",
-                exception
-            )
-        }
-
-        encoder = null
-
-        if (muxerStarted) {
             try {
-                muxer?.stop()
-                log("Muxer.stop() erfolgreich.")
+                muxer?.release()
             } catch (exception: Exception) {
                 logError(
-                    "Muxer.stop() fehlgeschlagen.",
+                    "Muxer.release() fehlgeschlagen.",
                     exception
                 )
             }
-        }
 
-        try {
-            muxer?.release()
-            log("Muxer.release() erfolgreich.")
+            muxer = null
+
+            muxerStarted = false
+            trackIndex = -1
+            started = false
+
+            log("release() abgeschlossen.")
         } catch (exception: Exception) {
             logError(
-                "Muxer.release() fehlgeschlagen.",
+                "Fehler während release().",
                 exception
             )
+
+            started = false
         }
-
-        muxer = null
-
-        muxerStarted = false
-        trackIndex = -1
-        started = false
-
-        log("release() abgeschlossen.")
-        log("==================================================")
     }
 }
