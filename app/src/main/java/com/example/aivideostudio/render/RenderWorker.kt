@@ -1,6 +1,5 @@
 package com.example.aivideostudio.render
 
-import android.content.Context
 import androidx.core.app.NotificationManagerCompat
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
@@ -14,22 +13,31 @@ import com.example.aivideostudio.data.GenerationStatus
 import com.example.aivideostudio.data.ProjectRepository
 import com.example.aivideostudio.data.RenderMode
 import com.example.aivideostudio.data.RenderPresets
+import com.example.aivideostudio.localai.LocalI2VEngine
+import com.example.aivideostudio.localai.LocalI2VGenerationProgress
+import com.example.aivideostudio.localai.LocalI2VGenerationRequest
 import com.example.aivideostudio.storyboard.GeneratedScene
 import com.example.aivideostudio.storyboard.VisualPromptAnalyzer
 import com.example.aivideostudio.util.RenderErrorLogger
 import java.io.File
 
 class RenderWorker(
-    context: Context,
+    context: android.content.Context,
     parameters: WorkerParameters
-) : CoroutineWorker(context, parameters) {
+) : CoroutineWorker(
+    context,
+    parameters
+) {
 
     override suspend fun doWork(): Result {
         val projectId =
-            inputData.getString(KEY_PROJECT_ID)
+            inputData.getString(
+                KEY_PROJECT_ID
+            )
                 ?: return Result.failure(
                     workDataOf(
-                        KEY_ERROR_MESSAGE to "Ungültige Projekt-ID."
+                        KEY_ERROR_MESSAGE to
+                            "Ungültige Projekt-ID."
                     )
                 )
 
@@ -41,45 +49,58 @@ class RenderWorker(
                     0
                 )
             )
-        } catch (exception: Exception) {
+        } catch (_: Exception) {
         }
 
         val database =
-            AppDatabase.getInstance(applicationContext)
+            AppDatabase.getInstance(
+                applicationContext
+            )
 
         val repository =
-            ProjectRepository(database)
+            ProjectRepository(
+                database
+            )
 
         val project =
-            repository.getProject(projectId)
+            repository.getProject(
+                projectId
+            )
                 ?: return Result.failure(
                     workDataOf(
-                        KEY_ERROR_MESSAGE to "Projekt wurde nicht gefunden."
+                        KEY_ERROR_MESSAGE to
+                            "Projekt wurde nicht gefunden."
                     )
                 )
 
         var sceneEntities =
-            repository.getScenes(projectId)
+            repository.getScenes(
+                projectId
+            )
 
         if (sceneEntities.isEmpty()) {
             return Result.failure(
                 workDataOf(
-                    KEY_ERROR_MESSAGE to "Keine Szenen für dieses Projekt vorhanden."
+                    KEY_ERROR_MESSAGE to
+                        "Keine Szenen für dieses Projekt vorhanden."
                 )
             )
         }
 
         val renderMode =
             try {
-                RenderMode.valueOf(project.renderMode)
-            } catch (exception: Exception) {
+                RenderMode.valueOf(
+                    project.renderMode
+                )
+            } catch (_: Exception) {
                 RenderMode.OFFLINE
             }
 
         return try {
             val decoded =
-                PcmAudioDecoder(project.songFilePath)
-                    .decode()
+                PcmAudioDecoder(
+                    project.songFilePath
+                ).decode()
 
             val beatDetector =
                 BeatDetector(
@@ -93,216 +114,73 @@ class RenderWorker(
 
             val visualParameters =
                 VisualPromptAnalyzer()
-                    .analyze(project.visualPrompt)
+                    .analyze(
+                        project.visualPrompt
+                    )
 
             val aiGeneratedMedia =
                 HashMap<String, SceneMediaInfo>()
 
-            if (renderMode == RenderMode.COMFYUI) {
-                val comfyUiBaseUrl =
-                    project.comfyUiBaseUrl
-
-                val workflowId =
-                    project.selectedWorkflowId
-
-                if (
-                    comfyUiBaseUrl.isNullOrBlank() ||
-                    workflowId.isNullOrBlank()
-                ) {
-                    return Result.failure(
-                        workDataOf(
-                            KEY_ERROR_MESSAGE to
-                                "ComfyUI-Server und Workflow müssen eingerichtet sein."
-                        )
-                    )
-                }
-
-                val storedWorkflow =
-                    WorkflowRepository()
-                        .listWorkflows(applicationContext)
-                        .firstOrNull {
-                            it.id == workflowId
-                        }
-                        ?: return Result.failure(
-                            workDataOf(
-                                KEY_ERROR_MESSAGE to
-                                    "KI-Workflow wurde nicht gefunden."
-                            )
-                        )
-
-                val orchestrator =
-                    SceneGenerationOrchestrator(
-                        applicationContext,
-                        comfyUiBaseUrl
-                    )
-
-                if (!orchestrator.checkConnection()) {
-                    return Result.failure(
-                        workDataOf(
-                            KEY_ERROR_MESSAGE to
-                                "ComfyUI-Server nicht erreichbar."
-                        )
-                    )
-                }
-
-                val sortedScenes =
-                    sceneEntities.sortedBy {
-                        it.orderIndex
-                    }
-
-                val failedSceneLabels =
-                    ArrayList<String>()
-
-                for (
-                    (index, scene)
-                    in sortedScenes.withIndex()
-                ) {
-                    val progressPercent =
-                        (index * 100) /
-                            sortedScenes.size.coerceAtLeast(1)
-
-                    val statusLabel =
-                        "Szene ${index + 1} von ${sortedScenes.size}: ${scene.label}"
-
-                    setProgressAsync(
-                        workDataOf(
-                            KEY_PROGRESS_PERCENT to progressPercent,
-                            KEY_CURRENT_SCENE to statusLabel
-                        )
-                    )
-
-                    updateNotification(
-                        statusLabel,
-                        progressPercent
-                    )
-
-                    val alreadyGenerated =
-                        scene.generationStatus ==
-                            GenerationStatus.GENERATED.name &&
-                            scene.generatedMediaPath != null &&
-                            File(scene.generatedMediaPath).exists()
-
-                    if (alreadyGenerated) {
-                        aiGeneratedMedia[scene.id] =
-                            SceneMediaInfo(
-                                filePath =
-                                    scene.generatedMediaPath!!,
-                                mediaType =
-                                    GeneratedMediaType.valueOf(
-                                        scene.generatedMediaType
-                                    )
-                            )
-
-                        continue
-                    }
-
-                    repository.markSceneGenerating(
-                        scene
-                    )
-
-                    val referenceImagePath =
-                        scene.referenceImagePath
-                            ?: project.characterReferenceImagePath
-
-                    val result =
-                        orchestrator.generateScene(
-                            scene = scene,
-                            workflow = storedWorkflow,
-                            negativePrompt =
-                                project.negativePrompt,
-                            width =
-                                project.resolutionWidth,
-                            height =
-                                project.resolutionHeight,
-                            characterReferenceImagePath =
-                                referenceImagePath
-                        ) { statusText ->
-                            val combinedLabel =
-                                "Szene ${index + 1} von ${sortedScenes.size}: $statusText"
-
-                            setProgressAsync(
-                                workDataOf(
-                                    KEY_PROGRESS_PERCENT to
-                                        progressPercent,
-                                    KEY_CURRENT_SCENE to
-                                        combinedLabel
-                                )
-                            )
-
-                            updateNotification(
-                                combinedLabel,
-                                progressPercent
-                            )
-                        }
-
-                    when (result) {
-                        is SceneGenerationResult.Success -> {
-                            repository.markSceneGenerated(
-                                scene,
-                                result.filePath,
-                                result.mediaType
-                            )
-
-                            aiGeneratedMedia[scene.id] =
-                                SceneMediaInfo(
-                                    result.filePath,
-                                    result.mediaType
-                                )
-                        }
-
-                        is SceneGenerationResult.Failure -> {
-                            repository.markSceneFailed(
-                                scene,
-                                result.message
-                            )
-
-                            failedSceneLabels.add(
-                                "${scene.label} (${result.message})"
-                            )
-                        }
-                    }
-                }
-
-                if (failedSceneLabels.isNotEmpty()) {
-                    return Result.failure(
-                        workDataOf(
-                            KEY_ERROR_MESSAGE to
-                                "KI-Generierung für ${failedSceneLabels.size} von ${sortedScenes.size} Szenen fehlgeschlagen: ${failedSceneLabels.joinToString("; ")}"
-                        )
-                    )
-                }
+            if (
+                renderMode ==
+                RenderMode.COMFYUI
+            ) {
+                generateComfyUiScenes(
+                    repository,
+                    project,
+                    sceneEntities,
+                    aiGeneratedMedia
+                )
 
                 sceneEntities =
-                    repository.getScenes(projectId)
+                    repository.getScenes(
+                        projectId
+                    )
+            } else {
+                generateOfflineScenes(
+                    repository,
+                    project,
+                    sceneEntities,
+                    aiGeneratedMedia
+                )
+
+                sceneEntities =
+                    repository.getScenes(
+                        projectId
+                    )
             }
 
             val generatedScenes =
-                sceneEntities.map { entity ->
-                    GeneratedScene(
-                        id = entity.id,
-                        orderIndex = entity.orderIndex,
-                        label = entity.label,
-                        startTimeSeconds =
-                            entity.startTimeSeconds,
-                        endTimeSeconds =
-                            entity.endTimeSeconds,
-                        prompt = entity.prompt,
-                        cameraMovement =
-                            entity.cameraMovement,
-                        transitionType =
-                            entity.transitionType,
-                        effects =
-                            entity.effectsJson
-                                .split(",")
-                                .filter {
-                                    it.isNotBlank()
-                                },
-                        intensity =
-                            entity.intensity,
-                        seed =
-                            entity.seed
-                    )
-                }
+                sceneEntities
+                    .map { entity ->
+                        GeneratedScene(
+                            id = entity.id,
+                            orderIndex =
+                                entity.orderIndex,
+                            label =
+                                entity.label,
+                            startTimeSeconds =
+                                entity.startTimeSeconds,
+                            endTimeSeconds =
+                                entity.endTimeSeconds,
+                            prompt =
+                                entity.prompt,
+                            cameraMovement =
+                                entity.cameraMovement,
+                            transitionType =
+                                entity.transitionType,
+                            effects =
+                                entity.effectsJson
+                                    .split(",")
+                                    .filter {
+                                        it.isNotBlank()
+                                    },
+                            intensity =
+                                entity.intensity,
+                            seed =
+                                entity.seed
+                        )
+                    }
 
             val backgroundPaths =
                 sceneEntities
@@ -310,7 +188,8 @@ class RenderWorker(
                         it.backgroundImagePath != null
                     }
                     .associate {
-                        it.id to it.backgroundImagePath!!
+                        it.id to
+                            it.backgroundImagePath!!
                     }
 
             val renderSettings =
@@ -325,7 +204,8 @@ class RenderWorker(
 
             val outputDirectory =
                 File(
-                    applicationContext.getExternalFilesDir(null),
+                    applicationContext
+                        .getExternalFilesDir(null),
                     "rendered_videos"
                 )
 
@@ -344,29 +224,39 @@ class RenderWorker(
                 )
 
             pipeline.render(
-                projectId = projectId,
-                songFilePath = project.songFilePath,
-                scenes = generatedScenes,
-                visualParameters = visualParameters,
-                audioFeatures = audioFeatures,
-                backgroundImagePaths = backgroundPaths,
-                aiGeneratedMedia = aiGeneratedMedia,
-                characterReferenceImagePath =
-                    project.characterReferenceImagePath
+                projectId =
+                    projectId,
+                songFilePath =
+                    project.songFilePath,
+                scenes =
+                    generatedScenes,
+                visualParameters =
+                    visualParameters,
+                audioFeatures =
+                    audioFeatures,
+                backgroundImagePaths =
+                    backgroundPaths,
+                aiGeneratedMedia =
+                    aiGeneratedMedia
             ) { progress ->
                 when (progress) {
                     is RenderProgress.InProgress -> {
                         val percent =
                             (
-                                progress.currentFrame.toFloat() /
+                                progress.currentFrame
+                                    .toFloat() /
                                     progress.totalFrames
                             )
-                                .coerceIn(0f, 1f)
+                                .coerceIn(
+                                    0f,
+                                    1f
+                                )
                                 .times(100f)
                                 .toInt()
 
                         if (
-                            percent != lastProgressPercent
+                            percent !=
+                            lastProgressPercent
                         ) {
                             lastProgressPercent =
                                 percent
@@ -451,9 +341,388 @@ class RenderWorker(
 
             Result.failure(
                 workDataOf(
-                    KEY_ERROR_MESSAGE to message
+                    KEY_ERROR_MESSAGE to
+                        message
                 )
             )
+        }
+    }
+
+    private suspend fun generateOfflineScenes(
+        repository: ProjectRepository,
+        project: com.example.aivideostudio.data.ProjectEntity,
+        scenes: List<com.example.aivideostudio.data.SceneEntity>,
+        aiGeneratedMedia: MutableMap<String, SceneMediaInfo>
+    ) {
+        val referenceImage =
+            project.characterReferenceImagePath
+
+        if (
+            referenceImage.isNullOrBlank() ||
+            !File(referenceImage).exists()
+        ) {
+            throw IllegalStateException(
+                "Für die lokale Bild-zu-Video-KI wurde kein Band/Artist-Referenzbild gefunden."
+            )
+        }
+
+        val engine =
+            LocalI2VEngine(
+                applicationContext
+            )
+
+        val sortedScenes =
+            scenes.sortedBy {
+                it.orderIndex
+            }
+
+        for (
+            (index, scene)
+            in sortedScenes.withIndex()
+        ) {
+            val basePercent =
+                (
+                    index.toFloat() /
+                        sortedScenes.size
+                ) * 100f
+
+            val label =
+                "Lokale KI – Szene ${index + 1} von ${sortedScenes.size}: ${scene.label}"
+
+            setProgressAsync(
+                workDataOf(
+                    KEY_PROGRESS_PERCENT to
+                        basePercent.toInt(),
+                    KEY_CURRENT_SCENE to
+                        label
+                )
+            )
+
+            updateNotification(
+                label,
+                basePercent.toInt()
+            )
+
+            val alreadyGenerated =
+                scene.generationStatus ==
+                    GenerationStatus.GENERATED.name &&
+                    scene.generatedMediaPath != null &&
+                    File(
+                        scene.generatedMediaPath
+                    ).exists() &&
+                    scene.generatedMediaType ==
+                    GeneratedMediaType.VIDEO.name
+
+            if (alreadyGenerated) {
+                aiGeneratedMedia[scene.id] =
+                    SceneMediaInfo(
+                        scene.generatedMediaPath!!,
+                        GeneratedMediaType.VIDEO
+                    )
+
+                continue
+            }
+
+            repository.markSceneGenerating(
+                scene
+            )
+
+            val sceneDuration =
+                (
+                    scene.endTimeSeconds -
+                        scene.startTimeSeconds
+                    )
+                    .coerceAtLeast(0.7)
+
+            val sceneFrames =
+                (
+                    sceneDuration *
+                        24.0
+                    )
+                    .toInt()
+                    .coerceAtLeast(17)
+
+            val outputDirectory =
+                File(
+                    applicationContext
+                        .getExternalFilesDir(null),
+                    "local_i2v_generated"
+                )
+
+            if (!outputDirectory.exists()) {
+                outputDirectory.mkdirs()
+            }
+
+            val outputFile =
+                File(
+                    outputDirectory,
+                    "${project.id}_${scene.id}.mp4"
+                )
+
+            val prompt =
+                scene.prompt
+                    .ifBlank {
+                        project.visualPrompt
+                    }
+
+            try {
+                val generatedFile =
+                    engine.generate(
+                        LocalI2VGenerationRequest(
+                            referenceImagePath =
+                                referenceImage,
+                            prompt =
+                                prompt,
+                            negativePrompt =
+                                project.negativePrompt,
+                            outputFile =
+                                outputFile,
+                            width =
+                                project.resolutionWidth,
+                            height =
+                                project.resolutionHeight,
+                            frameRate =
+                                24,
+                            frames =
+                                17,
+                            diffusionSteps =
+                                2,
+                            seed =
+                                scene.seed
+                        )
+                    ) { progress ->
+                        val localProgress =
+                            progress.progress
+                                .coerceIn(
+                                    0f,
+                                    1f
+                                )
+
+                        val totalPercent =
+                            (
+                                basePercent +
+                                    localProgress *
+                                    (
+                                        100f /
+                                            sortedScenes.size
+                                    )
+                                )
+                                .toInt()
+                                .coerceIn(
+                                    0,
+                                    100
+                                )
+
+                        val status =
+                            "$label – ${progress.stage}"
+
+                        setProgressAsync(
+                            workDataOf(
+                                KEY_PROGRESS_PERCENT to
+                                    totalPercent,
+                                KEY_CURRENT_SCENE to
+                                    status
+                            )
+                        )
+
+                        updateNotification(
+                            status,
+                            totalPercent
+                        )
+                    }
+
+                repository.markSceneGenerated(
+                    scene,
+                    generatedFile.absolutePath,
+                    GeneratedMediaType.VIDEO
+                )
+
+                aiGeneratedMedia[scene.id] =
+                    SceneMediaInfo(
+                        generatedFile.absolutePath,
+                        GeneratedMediaType.VIDEO
+                    )
+            } catch (exception: Exception) {
+                repository.markSceneFailed(
+                    scene,
+                    exception.message
+                        ?: "Lokale Bild-zu-Video-Generierung fehlgeschlagen."
+                )
+
+                throw IllegalStateException(
+                    "Lokale KI für Szene '${scene.label}' fehlgeschlagen: " +
+                        (
+                            exception.message
+                                ?: "unbekannter Fehler"
+                            )
+                )
+            }
+        }
+    }
+
+    private suspend fun generateComfyUiScenes(
+        repository: ProjectRepository,
+        project: com.example.aivideostudio.data.ProjectEntity,
+        scenes: List<com.example.aivideostudio.data.SceneEntity>,
+        aiGeneratedMedia: MutableMap<String, SceneMediaInfo>
+    ) {
+        val comfyUiBaseUrl =
+            project.comfyUiBaseUrl
+
+        val workflowId =
+            project.selectedWorkflowId
+
+        if (
+            comfyUiBaseUrl.isNullOrBlank() ||
+            workflowId.isNullOrBlank()
+        ) {
+            throw IllegalStateException(
+                "ComfyUI-Server und Workflow müssen eingerichtet sein."
+            )
+        }
+
+        val storedWorkflow =
+            WorkflowRepository()
+                .listWorkflows(
+                    applicationContext
+                )
+                .firstOrNull {
+                    it.id == workflowId
+                }
+                ?: throw IllegalStateException(
+                    "KI-Workflow wurde nicht gefunden."
+                )
+
+        val orchestrator =
+            SceneGenerationOrchestrator(
+                applicationContext,
+                comfyUiBaseUrl
+            )
+
+        if (!orchestrator.checkConnection()) {
+            throw IllegalStateException(
+                "ComfyUI-Server nicht erreichbar."
+            )
+        }
+
+        val sortedScenes =
+            scenes.sortedBy {
+                it.orderIndex
+            }
+
+        for (
+            (index, scene)
+            in sortedScenes.withIndex()
+        ) {
+            val progressPercent =
+                (
+                    index * 100
+                ) /
+                    sortedScenes.size
+                        .coerceAtLeast(1)
+
+            val statusLabel =
+                "ComfyUI – Szene ${index + 1} von ${sortedScenes.size}: ${scene.label}"
+
+            setProgressAsync(
+                workDataOf(
+                    KEY_PROGRESS_PERCENT to
+                        progressPercent,
+                    KEY_CURRENT_SCENE to
+                        statusLabel
+                )
+            )
+
+            updateNotification(
+                statusLabel,
+                progressPercent
+            )
+
+            val alreadyGenerated =
+                scene.generationStatus ==
+                    GenerationStatus.GENERATED.name &&
+                    scene.generatedMediaPath != null &&
+                    File(
+                        scene.generatedMediaPath
+                    ).exists()
+
+            if (alreadyGenerated) {
+                aiGeneratedMedia[scene.id] =
+                    SceneMediaInfo(
+                        scene.generatedMediaPath!!,
+                        GeneratedMediaType.valueOf(
+                            scene.generatedMediaType
+                        )
+                    )
+
+                continue
+            }
+
+            repository.markSceneGenerating(
+                scene
+            )
+
+            val referenceImagePath =
+                scene.referenceImagePath
+                    ?: project.characterReferenceImagePath
+
+            val result =
+                orchestrator.generateScene(
+                    scene = scene,
+                    workflow = storedWorkflow,
+                    negativePrompt =
+                        project.negativePrompt,
+                    width =
+                        project.resolutionWidth,
+                    height =
+                        project.resolutionHeight,
+                    characterReferenceImagePath =
+                        referenceImagePath
+                ) { statusText ->
+                    val combinedLabel =
+                        "$statusLabel – $statusText"
+
+                    setProgressAsync(
+                        workDataOf(
+                            KEY_PROGRESS_PERCENT to
+                                progressPercent,
+                            KEY_CURRENT_SCENE to
+                                combinedLabel
+                        )
+                    )
+
+                    updateNotification(
+                        combinedLabel,
+                        progressPercent
+                    )
+                }
+
+            when (result) {
+                is SceneGenerationResult.Success -> {
+                    repository.markSceneGenerated(
+                        scene,
+                        result.filePath,
+                        result.mediaType
+                    )
+
+                    aiGeneratedMedia[scene.id] =
+                        SceneMediaInfo(
+                            result.filePath,
+                            result.mediaType
+                        )
+                }
+
+                is SceneGenerationResult.Failure -> {
+                    repository.markSceneFailed(
+                        scene,
+                        result.message
+                    )
+
+                    throw IllegalStateException(
+                        "ComfyUI-Szene '${scene.label}' fehlgeschlagen: ${result.message}"
+                    )
+                }
+            }
         }
     }
 
@@ -475,7 +744,7 @@ class RenderWorker(
                     RenderNotifications.NOTIFICATION_ID,
                     notification
                 )
-        } catch (exception: SecurityException) {
+        } catch (_: SecurityException) {
         }
     }
 
