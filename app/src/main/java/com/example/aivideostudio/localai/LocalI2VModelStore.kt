@@ -1,320 +1,171 @@
 package com.example.aivideostudio.localai
 
 import android.content.Context
-import android.net.Uri
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import java.io.File
-import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.security.MessageDigest
+import java.util.concurrent.TimeUnit
 
-class LocalI2VModelStore(
-    private val context: Context
-) {
+data class LocalI2VModelFile(
+    val fileName: String,
+    val downloadUrl: String,
+    val expectedSha256: String?,
+    val approxSizeBytes: Long
+)
 
-    companion object {
-        const val VAE_ENCODER =
-            "vae_encoder.onnx"
+sealed class ModelDownloadProgress {
+    data class Downloading(val fileName: String, val fileIndex: Int, val totalFiles: Int, val percentOfFile: Int) : ModelDownloadProgress()
+    data class Verifying(val fileName: String) : ModelDownloadProgress()
+    data class Failed(val message: String) : ModelDownloadProgress()
+    object Completed : ModelDownloadProgress()
+}
 
-        const val QWEN2_ENCODER =
-            "qwen2_encoder.onnx"
+class LocalI2VModelStore(private val context: Context) {
 
-        const val MOBILE_I2V_UNET =
-            "mobilei2v_unet.onnx"
+    private val httpClient = OkHttpClient.Builder()
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(10, TimeUnit.MINUTES)
+        .build()
 
-        const val TURBO_VAED =
-            "turbo_vaed.onnx"
+    private val requiredModels = listOf(
+        LocalI2VModelFile(
+            fileName = "vae_encoder.onnx",
+            downloadUrl = "",
+            expectedSha256 = null,
+            approxSizeBytes = 50L * 1024 * 1024
+        ),
+        LocalI2VModelFile(
+            fileName = "qwen2_encoder.onnx",
+            downloadUrl = "",
+            expectedSha256 = null,
+            approxSizeBytes = 900L * 1024 * 1024
+        ),
+        LocalI2VModelFile(
+            fileName = "mobilei2v_unet.onnx",
+            downloadUrl = "",
+            expectedSha256 = null,
+            approxSizeBytes = 540L * 1024 * 1024
+        ),
+        LocalI2VModelFile(
+            fileName = "turbo_vaed.onnx",
+            downloadUrl = "",
+            expectedSha256 = null,
+            approxSizeBytes = 100L * 1024 * 1024
+        )
+    )
 
-        private const val MINIMUM_MODEL_SIZE =
-            1024L
-
-        private val REQUIRED_MODELS =
-            listOf(
-                VAE_ENCODER,
-                QWEN2_ENCODER,
-                MOBILE_I2V_UNET,
-                TURBO_VAED
-            )
-    }
-
-    fun getDirectory(): File {
-        val externalDirectory =
-            context
-                .getExternalFilesDir(null)
-                ?.resolve(
-                    "local_i2v_models"
-                )
-
-        val directory =
-            externalDirectory
-                ?: File(
-                    context.filesDir,
-                    "local_i2v_models"
-                )
-
-        if (!directory.exists()) {
-            directory.mkdirs()
-        }
-
+    fun getModelDirectory(): File {
+        val directory = File(context.getExternalFilesDir(null), "local_i2v_models")
+        if (!directory.exists()) directory.mkdirs()
         return directory
     }
 
-    fun getModelFile(
-        name: String
-    ): File {
-        require(
-            name in REQUIRED_MODELS
-        ) {
-            "Unbekanntes MobileI2V-Modell: $name"
-        }
+    fun getRequiredModels(): List<LocalI2VModelFile> = requiredModels
 
-        return File(
-            getDirectory(),
-            name
-        )
-    }
-
-    fun isModelInstalled(
-        name: String
-    ): Boolean {
-        val file =
-            getModelFile(name)
-
-        return file.exists() &&
-            file.isFile &&
-            file.length() >
-                MINIMUM_MODEL_SIZE
-    }
-
-    fun areAllModelsInstalled():
-        Boolean {
-        return REQUIRED_MODELS.all {
-            isModelInstalled(it)
+    fun getMissingModels(): List<LocalI2VModelFile> {
+        val directory = getModelDirectory()
+        return requiredModels.filter { model ->
+            val file = File(directory, model.fileName)
+            !file.exists() || file.length() < 1024L
         }
     }
 
-    fun getMissingModels():
-        List<String> {
-        return REQUIRED_MODELS.filterNot {
-            isModelInstalled(it)
-        }
-    }
+    fun areAllModelsInstalled(): Boolean = getMissingModels().isEmpty()
 
-    fun getInstalledModels():
-        List<File> {
-        return REQUIRED_MODELS
-            .map {
-                getModelFile(it)
-            }
-            .filter {
-                it.exists() &&
-                    it.isFile &&
-                    it.length() >
-                    MINIMUM_MODEL_SIZE
-            }
-    }
+    fun getModelFile(fileName: String): File = File(getModelDirectory(), fileName)
 
-    fun installModel(
-        sourceUri: Uri,
-        modelName: String,
-        onProgress:
-            ((Long, Long) -> Unit)? = null
-    ): File {
-        require(
-            modelName in REQUIRED_MODELS
-        ) {
-            "Unbekanntes MobileI2V-Modell: $modelName"
-        }
-
-        val destination =
-            getModelFile(modelName)
-
-        val temporary =
-            File(
-                destination.parentFile,
-                "$modelName.partial"
-            )
-
-        if (temporary.exists()) {
-            temporary.delete()
-        }
-
-        val contentResolver =
-            context.contentResolver
-
-        val totalBytes =
-            contentResolver
-                .openAssetFileDescriptor(
-                    sourceUri,
-                    "r"
-                )
-                ?.use {
-                    it.length
-                }
-                ?: -1L
-
-        var copiedBytes = 0L
-
-        contentResolver
-            .openInputStream(sourceUri)
-            ?.use { input ->
-                FileOutputStream(
-                    temporary
-                ).use { output ->
-
-                    val buffer =
-                        ByteArray(
-                            1024 * 1024
-                        )
-
-                    while (true) {
-                        val read =
-                            input.read(buffer)
-
-                        if (read <= 0) {
-                            break
-                        }
-
-                        output.write(
-                            buffer,
-                            0,
-                            read
-                        )
-
-                        copiedBytes +=
-                            read
-
-                        onProgress?.invoke(
-                            copiedBytes,
-                            totalBytes
-                        )
-                    }
-
-                    output.flush()
-                    output.fd.sync()
-                }
-            }
-            ?: throw IllegalStateException(
-                "Modell konnte nicht gelesen werden."
-            )
-
-        if (
-            !temporary.exists() ||
-            temporary.length() <=
-                MINIMUM_MODEL_SIZE
-        ) {
-            temporary.delete()
-
-            throw IllegalStateException(
-                "Die Modelldatei ist leer oder ungültig."
-            )
-        }
-
-        if (destination.exists()) {
-            destination.delete()
-        }
-
-        if (
-            !temporary.renameTo(
-                destination
-            )
-        ) {
-            temporary.copyTo(
-                destination,
-                overwrite = true
-            )
-
-            temporary.delete()
-        }
-
-        return destination
-    }
-
-    fun calculateSha256(
-        file: File
-    ): String {
-        val digest =
-            MessageDigest.getInstance(
-                "SHA-256"
-            )
-
-        FileInputStream(file).use {
-            input ->
-
-            val buffer =
-                ByteArray(
-                    1024 * 1024
-                )
-
-            while (true) {
-                val read =
-                    input.read(buffer)
-
-                if (read <= 0) {
-                    break
-                }
-
-                digest.update(
-                    buffer,
-                    0,
-                    read
-                )
-            }
-        }
-
-        return digest
-            .digest()
-            .joinToString("") {
-                "%02x".format(it)
-            }
-    }
-
-    fun describeInstallation():
-        String {
-        val directory =
-            getDirectory()
-
-        val missing =
-            getMissingModels()
-
+    suspend fun downloadMissingModels(
+        urlsByFileName: Map<String, String>,
+        onProgress: (ModelDownloadProgress) -> Unit
+    ): Boolean = withContext(Dispatchers.IO) {
+        val missing = getMissingModels()
         if (missing.isEmpty()) {
-            return buildString {
-                append(
-                    "Alle lokalen MobileI2V-Modelle " +
-                        "sind vorhanden.\n"
-                )
+            onProgress(ModelDownloadProgress.Completed)
+            return@withContext true
+        }
 
-                append(
-                    "Ordner: "
-                )
+        for ((index, model) in missing.withIndex()) {
+            val url = urlsByFileName[model.fileName]
+            if (url.isNullOrBlank()) {
+                onProgress(ModelDownloadProgress.Failed("Keine Download-URL für ${model.fileName} hinterlegt."))
+                return@withContext false
+            }
 
-                append(
-                    directory.absolutePath
-                )
+            val targetFile = getModelFile(model.fileName)
+            val partialFile = File(targetFile.parentFile, "${model.fileName}.part")
+
+            try {
+                val request = Request.Builder().url(url).get().build()
+                httpClient.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        onProgress(ModelDownloadProgress.Failed("Download von ${model.fileName} fehlgeschlagen (${response.code})."))
+                        return@withContext false
+                    }
+                    val body = response.body ?: run {
+                        onProgress(ModelDownloadProgress.Failed("Leere Antwort beim Download von ${model.fileName}."))
+                        return@withContext false
+                    }
+                    val totalBytes = body.contentLength().takeIf { it > 0 } ?: model.approxSizeBytes
+                    var downloadedBytes = 0L
+                    var lastReportedPercent = -1
+
+                    body.byteStream().use { input ->
+                        FileOutputStream(partialFile).use { output ->
+                            val buffer = ByteArray(1024 * 256)
+                            while (true) {
+                                val read = input.read(buffer)
+                                if (read < 0) break
+                                output.write(buffer, 0, read)
+                                downloadedBytes += read
+                                val percent = ((downloadedBytes * 100) / totalBytes).toInt().coerceIn(0, 100)
+                                if (percent != lastReportedPercent) {
+                                    lastReportedPercent = percent
+                                    onProgress(ModelDownloadProgress.Downloading(model.fileName, index + 1, missing.size, percent))
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (model.expectedSha256 != null) {
+                    onProgress(ModelDownloadProgress.Verifying(model.fileName))
+                    val actualHash = computeSha256(partialFile)
+                    if (!actualHash.equals(model.expectedSha256, ignoreCase = true)) {
+                        partialFile.delete()
+                        onProgress(ModelDownloadProgress.Failed("Prüfsumme von ${model.fileName} stimmt nicht überein. Download verworfen."))
+                        return@withContext false
+                    }
+                }
+
+                if (!partialFile.renameTo(targetFile)) {
+                    onProgress(ModelDownloadProgress.Failed("Konnte ${model.fileName} nach dem Download nicht umbenennen."))
+                    return@withContext false
+                }
+            } catch (exception: Exception) {
+                partialFile.delete()
+                onProgress(ModelDownloadProgress.Failed("Fehler beim Download von ${model.fileName}: ${exception.message}"))
+                return@withContext false
             }
         }
 
-        return buildString {
-            append(
-                "Lokale MobileI2V-Modelle fehlen.\n"
-            )
+        onProgress(ModelDownloadProgress.Completed)
+        true
+    }
 
-            append(
-                "Ordner: "
-            )
-
-            append(
-                directory.absolutePath
-            )
-
-            append(
-                "\n\nFehlend:\n"
-            )
-
-            missing.forEach {
-                append("• ")
-                append(it)
-                append('\n')
+    private fun computeSha256(file: File): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        file.inputStream().use { input ->
+            val buffer = ByteArray(1024 * 256)
+            while (true) {
+                val read = input.read(buffer)
+                if (read < 0) break
+                digest.update(buffer, 0, read)
             }
         }
+        return digest.digest().joinToString("") { "%02x".format(it) }
     }
 }
