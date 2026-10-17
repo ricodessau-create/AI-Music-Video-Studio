@@ -64,6 +64,12 @@ class LocalI2VModelStore(private val context: Context) {
         return directory
     }
 
+    /**
+     * Alias für getModelDirectory(), damit bestehender Code (z. B. LocalI2VEngine.kt),
+     * der den ursprünglichen Methodennamen verwendet, weiterhin kompiliert.
+     */
+    fun getDirectory(): File = getModelDirectory()
+
     fun getRequiredModels(): List<LocalI2VModelFile> = requiredModels
 
     fun getMissingModels(): List<LocalI2VModelFile> {
